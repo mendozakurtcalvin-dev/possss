@@ -780,7 +780,7 @@ case 'hr':
 
                 <script>
                 // ============================================
-                // HR JAVASCRIPT - COMPLETE FUNCTION SET
+                // HR page scripts
                 // ============================================
 
                 function validateEmployeePhone(input) {
@@ -1347,7 +1347,7 @@ case 'hr':
                                 }
                             });
                         },
-                        'warning'  // ← Use the amber/warning style for payroll
+                        'warning'
                      );
                 }
 

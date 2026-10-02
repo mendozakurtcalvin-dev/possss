@@ -126,6 +126,7 @@ case 'settings':
                 
                 <!-- Settings Form -->
                 <form method="POST" enctype="multipart/form-data" id="settingsForm">
+                    <input type="hidden" name="save_settings" value="1">
                     
                     <!-- ===== STORE IDENTITY SECTION ===== -->
                     <div class="set-section">
@@ -237,7 +238,7 @@ case 'settings':
                                         VAT Rate (%)
                                     </label>
                                     <input type="number" step="0.01" name="tax_rate" value="<?php echo $current_tax; ?>" min="0" max="100" class="set-form-input" placeholder="12">
-                                    <div class="set-form-hint">Philippines standard rate: 12%</div>
+                                    <div class="set-form-hint">Philippines standard rate: 12%. Product prices are treated as VAT-inclusive; VAT is extracted from the final price.</div>
                                 </div>
                                 <div class="set-form-group">
                                     <label class="set-form-label">
@@ -249,7 +250,7 @@ case 'settings':
                                         </svg>
                                         VAT Registration Number
                                     </label>
-                                    <input type="text" name="vat_reg_number" value="<?php echo htmlspecialchars($vat_reg_number); ?>" class="set-form-input" placeholder="e.g., 123-456-789-000">
+                                    <input type="text" name="vat_reg_number" value="<?php echo htmlspecialchars($vat_reg_number); ?>" class="set-form-input" placeholder="Enter registered VAT number">
                                     <div class="set-form-hint">Printed on receipts</div>
                                 </div>
                             </div>
@@ -267,7 +268,7 @@ case 'settings':
                             </svg>
                             Changes will apply system-wide
                         </div>
-                        <button type="submit" name="save_settings" class="set-btn-save" id="saveSettingsBtn">
+                        <button type="submit" class="set-btn-save" id="saveSettingsBtn">
                             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
                                 <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path>
                                 <polyline points="17 21 17 13 7 13 7 21"></polyline>

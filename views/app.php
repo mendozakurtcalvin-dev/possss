@@ -489,86 +489,112 @@
             <div class="brand-text"><?php echo $store_name; ?><small>Point of Sale</small></div>
         </div>
         
+      <svg class="nav-icon-library" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+        <symbol id="nav-dashboard" viewBox="0 0 24 24"><path d="m3 10 9-7 9 7v10a1 1 0 0 1-1 1h-5v-7H9v7H4a1 1 0 0 1-1-1z"/></symbol>
+        <symbol id="nav-cart" viewBox="0 0 24 24"><circle cx="9" cy="21" r="1"/><circle cx="19" cy="21" r="1"/><path d="M1 1h4l2.7 13.4a2 2 0 0 0 2 1.6h9.7a2 2 0 0 0 2-1.6L23 6H6"/></symbol>
+        <symbol id="nav-finance" viewBox="0 0 24 24"><path d="M12 2v20m5-16H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></symbol>
+        <symbol id="nav-returns" viewBox="0 0 24 24"><path d="M3 7v6h6M21 17v-6h-6"/><path d="M5.1 13a7 7 0 0 0 11.8 3L21 13M18.9 11A7 7 0 0 0 7.1 8L3 11"/></symbol>
+        <symbol id="nav-people" viewBox="0 0 24 24"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.9M16 3.1a4 4 0 0 1 0 7.8"/></symbol>
+        <symbol id="nav-products" viewBox="0 0 24 24"><path d="m12 3 9 5-9 5-9-5 9-5Z"/><path d="m3 12 9 5 9-5M3 16l9 5 9-5"/></symbol>
+        <symbol id="nav-stock" viewBox="0 0 24 24"><path d="M4 4h16v16H4zM8 8h8M8 12h8M8 16h5"/></symbol>
+        <symbol id="nav-purchases" viewBox="0 0 24 24"><path d="M12 3v13m-5-5 5 5 5-5"/><path d="M5 17v4h14v-4"/></symbol>
+        <symbol id="nav-suppliers" viewBox="0 0 24 24"><path d="M3 7h11v12H3zM14 11h4l3 3v5h-7"/><circle cx="7.5" cy="19" r="2"/><circle cx="17.5" cy="19" r="2"/></symbol>
+        <symbol id="nav-reports" viewBox="0 0 24 24"><path d="M4 19V5m0 14h17"/><path d="m7 15 4-4 3 2 6-7"/><path d="M16 6h4v4"/></symbol>
+        <symbol id="nav-categories" viewBox="0 0 24 24"><rect x="3" y="3" width="8" height="8" rx="1"/><rect x="13" y="3" width="8" height="8" rx="1"/><rect x="3" y="13" width="8" height="8" rx="1"/><rect x="13" y="13" width="8" height="8" rx="1"/></symbol>
+        <symbol id="nav-archive" viewBox="0 0 24 24"><path d="M3 4h18v5H3zM5 9v11h14V9M10 13h4"/></symbol>
+        <symbol id="nav-customers" viewBox="0 0 24 24"><circle cx="9" cy="8" r="4"/><path d="M2 21v-2a7 7 0 0 1 14 0v2M17 5a4 4 0 0 1 0 7m2 3a5 5 0 0 1 3 4v2"/></symbol>
+        <symbol id="nav-sales" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></symbol>
+        <symbol id="nav-users" viewBox="0 0 24 24"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M19 8v6m-3-3h6"/></symbol>
+        <symbol id="nav-activity" viewBox="0 0 24 24"><path d="M3 12h4l3-8 4 16 3-8h4"/></symbol>
+        <symbol id="nav-settings" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="m19.4 15 .1.1 1.4 1.1-1.4 2.4-1.7-.6a8 8 0 0 1-1.7 1l-.3 1.8h-2.8l-.3-1.8a8 8 0 0 1-1.7-1l-1.7.6-1.4-2.4 1.4-1.1a7 7 0 0 1 0-2l-1.4-1.1 1.4-2.4 1.7.6a8 8 0 0 1 1.7-1l.3-1.8h2.8l.3 1.8a8 8 0 0 1 1.7 1l1.7-.6 1.4 2.4-1.4 1.1a7 7 0 0 1 0 2Z"/></symbol>
+        <symbol id="nav-notifications" viewBox="0 0 24 24"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9m-8 13h4"/></symbol>
+        <symbol id="nav-add" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+        <symbol id="nav-attendance" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M16 3v4M8 3v4M3 10h18m-13 5 2 2 4-4"/></symbol>
+        <symbol id="nav-leave" viewBox="0 0 24 24"><path d="M12 3v9l6 3"/><circle cx="12" cy="12" r="9"/></symbol>
+        <symbol id="nav-payroll" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 10h18m-13 5h4"/></symbol>
+        <symbol id="nav-logout" viewBox="0 0 24 24"><path d="M10 17l5-5-5-5m5 5H3"/><path d="M12 3h7a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-7"/></symbol>
+        <symbol id="nav-switch" viewBox="0 0 24 24"><path d="M16 3h5v5m0-5-7 7M8 21H3v-5m0 5 7-7"/><path d="M14 14h7v7M21 14l-7 7M3 3l7 7"/></symbol>
+      </svg>
       <nav class="sidebar-nav">
     <div class="nav-label">Main</div>
     <?php if (canAccess('dashboard')): ?>
-    <a href="?page=dashboard" class="<?php echo (!isset($_GET['page']) || $_GET['page'] == 'dashboard') ? 'active' : ''; ?>"><span class="icon">📊</span> Dashboard</a>
+    <a href="?page=dashboard" class="<?php echo (!isset($_GET['page']) || $_GET['page'] == 'dashboard') ? 'active' : ''; ?>"><svg class="nav-icon"><use href="#nav-dashboard"></use></svg>Dashboard</a>
     <?php endif; ?>
     
     <?php if (canAccess('cart')): ?>
-    <a href="?page=cart" class="<?php echo (isset($_GET['page']) && $_GET['page'] == 'cart') ? 'active' : ''; ?>"><span class="icon">🛒</span> Cart</a>
+    <a href="?page=cart" class="<?php echo (isset($_GET['page']) && $_GET['page'] == 'cart') ? 'active' : ''; ?>"><svg class="nav-icon"><use href="#nav-cart"></use></svg>Cart</a>
     <?php endif; ?>
     
     <div class="nav-label" style="margin-top:1rem;">Management</div>
     
     <?php if (canAccess('finance_dashboard')): ?>
-    <a href="?page=finance_dashboard" class="<?php echo (isset($_GET['page']) && $_GET['page'] == 'finance_dashboard') ? 'active' : ''; ?>"><span class="icon">💰</span> Finance</a>
+    <a href="?page=finance_dashboard" class="<?php echo (isset($_GET['page']) && $_GET['page'] == 'finance_dashboard') ? 'active' : ''; ?>"><svg class="nav-icon"><use href="#nav-finance"></use></svg>Finance</a>
     <?php endif; ?>
     <?php if (canAccess('finance_reports')): ?>
-    <a href="?page=finance_reports" class="<?php echo (isset($_GET['page']) && $_GET['page'] == 'finance_reports') ? 'active' : ''; ?>"><span class="icon">📊</span> Finance Reports</a>
+    <a href="?page=finance_reports" class="<?php echo (isset($_GET['page']) && $_GET['page'] == 'finance_reports') ? 'active' : ''; ?>"><svg class="nav-icon"><use href="#nav-reports"></use></svg>Finance Reports</a>
     <?php endif; ?>
 
-        <!-- ===== ADD THIS AFTER THE FINANCE LINK ===== -->
+
     <?php if (canAccess('returns') || canAccess('returns_create')): ?>
-    <a href="?page=returns" class="<?php echo (isset($_GET['page']) && $_GET['page'] == 'returns') ? 'active' : ''; ?>"><span class="icon">🔄</span> Returns</a>
+    <a href="?page=returns" class="<?php echo (isset($_GET['page']) && $_GET['page'] == 'returns') ? 'active' : ''; ?>"><svg class="nav-icon"><use href="#nav-returns"></use></svg>Returns</a>
     <?php endif; ?>
     
     <?php if (canAccess('hr') && !isAdmin()): ?>
-        <a href="?page=hr" class="<?php echo (isset($_GET['page']) && $_GET['page'] == 'hr') ? 'active' : ''; ?>"><span class="icon">👥</span> HR</a>
+        <a href="?page=hr" class="<?php echo (isset($_GET['page']) && $_GET['page'] == 'hr') ? 'active' : ''; ?>"><svg class="nav-icon"><use href="#nav-people"></use></svg>HR</a>
     <?php endif; ?>
     
     <!-- HR Sub-menu items - Always visible for HR-role users -->
     <!-- HR Sub-menu items - Always visible for HR-role users -->
     <!-- HR Sub-menu items - Always visible for HR-role users -->
     <?php if (canAccess('hr') && !isAdmin()): ?>
-    <a href="?page=hr&open=add_employee" style="padding-left: 2.5rem; font-size: 0.85rem;"><span class="icon">➕</span> Add Employee</a>
-    <a href="?page=hr&open=attendance" style="padding-left: 2.5rem; font-size: 0.85rem;"><span class="icon">📋</span> Take Attendance</a>
-    <a href="?page=hr&open=leave" style="padding-left: 2.5rem; font-size: 0.85rem;"><span class="icon">📅</span> Leave Request</a>
-    <a href="?page=hr&open=payroll" style="padding-left: 2.5rem; font-size: 0.85rem;"><span class="icon">💰</span> Process Payroll</a>
-    <a href="?page=hr&open=stats" style="padding-left: 2.5rem; font-size: 0.85rem;"><span class="icon">📊</span> Employee Stats</a>
+    <a href="?page=hr&open=add_employee" style="padding-left: 2.5rem; font-size: 0.85rem;"><svg class="nav-icon"><use href="#nav-add"></use></svg>Add Employee</a>
+    <a href="?page=hr&open=attendance" style="padding-left: 2.5rem; font-size: 0.85rem;"><svg class="nav-icon"><use href="#nav-attendance"></use></svg>Take Attendance</a>
+    <a href="?page=hr&open=leave" style="padding-left: 2.5rem; font-size: 0.85rem;"><svg class="nav-icon"><use href="#nav-leave"></use></svg>Leave Request</a>
+    <a href="?page=hr&open=payroll" style="padding-left: 2.5rem; font-size: 0.85rem;"><svg class="nav-icon"><use href="#nav-payroll"></use></svg>Process Payroll</a>
+    <a href="?page=hr&open=stats" style="padding-left: 2.5rem; font-size: 0.85rem;"><svg class="nav-icon"><use href="#nav-reports"></use></svg>Employee Stats</a>
     <?php endif; ?>
 
     <?php if (!isAdmin() && hasRole('hr')): ?>
-    <a href="?page=users&add_role=1" style="padding-left: 2.5rem; font-size: 0.85rem;"><span class="icon">➕</span> Add Role</a>
+    <a href="?page=users&add_role=1" style="padding-left: 2.5rem; font-size: 0.85rem;"><svg class="nav-icon"><use href="#nav-add"></use></svg>Add Role</a>
     <?php endif; ?>
     <?php if (!isAdmin() && hasRole('hr')): ?>
-    <a href="?page=users" style="padding-left: 2.5rem; font-size: 0.85rem;"><span class="icon">✏️</span> Edit User Roles</a>
+    <a href="?page=users" style="padding-left: 2.5rem; font-size: 0.85rem;"><svg class="nav-icon"><use href="#nav-users"></use></svg>Edit User Roles</a>
     <?php endif; ?>
     
     <?php if (canAccess('products')): ?>
-    <a href="?page=products" class="<?php echo (isset($_GET['page']) && $_GET['page'] == 'products') ? 'active' : ''; ?>"><span class="icon">📦</span> Products</a>
+    <a href="?page=products" class="<?php echo (isset($_GET['page']) && $_GET['page'] == 'products') ? 'active' : ''; ?>"><svg class="nav-icon"><use href="#nav-products"></use></svg>Products</a>
     <?php endif; ?>
 
     <?php if (canAccess('stock')): ?>
-    <a href="?page=stock" class="<?php echo (isset($_GET['page']) && $_GET['page'] == 'stock') ? 'active' : ''; ?>"><span class="icon">📊</span> Stock</a>
+    <a href="?page=stock" class="<?php echo (isset($_GET['page']) && $_GET['page'] == 'stock') ? 'active' : ''; ?>"><svg class="nav-icon"><use href="#nav-stock"></use></svg>Stock</a>
     <?php endif; ?>
 
     <?php if (canAccess('purchases')): ?>
-    <a href="?page=purchases" class="<?php echo (isset($_GET['page']) && $_GET['page'] == 'purchases') ? 'active' : ''; ?>"><span class="icon">🛒</span> Purchases</a>
+    <a href="?page=purchases" class="<?php echo (isset($_GET['page']) && $_GET['page'] == 'purchases') ? 'active' : ''; ?>"><svg class="nav-icon"><use href="#nav-purchases"></use></svg>Purchases</a>
     <?php endif; ?>
 
     <?php if (canAccess('suppliers')): ?>
-    <a href="?page=suppliers" class="<?php echo (isset($_GET['page']) && $_GET['page'] == 'suppliers') ? 'active' : ''; ?>"><span class="icon">🏢</span> Suppliers</a>
+    <a href="?page=suppliers" class="<?php echo (isset($_GET['page']) && $_GET['page'] == 'suppliers') ? 'active' : ''; ?>"><svg class="nav-icon"><use href="#nav-suppliers"></use></svg>Suppliers</a>
     <?php endif; ?>
 
     <?php if (canAccess('inventory_reports')): ?>
-    <a href="?page=inventory_reports" class="<?php echo (isset($_GET['page']) && $_GET['page'] == 'inventory_reports') ? 'active' : ''; ?>"><span class="icon">📈</span> Inventory Reports</a>
+    <a href="?page=inventory_reports" class="<?php echo (isset($_GET['page']) && $_GET['page'] == 'inventory_reports') ? 'active' : ''; ?>"><svg class="nav-icon"><use href="#nav-reports"></use></svg>Inventory Reports</a>
     <?php endif; ?>
     
     <?php if (canAccess('categories')): ?>
-    <a href="?page=categories" class="<?php echo (isset($_GET['page']) && $_GET['page'] == 'categories') ? 'active' : ''; ?>"><span class="icon">🏷️</span> Categories</a>
+    <a href="?page=categories" class="<?php echo (isset($_GET['page']) && $_GET['page'] == 'categories') ? 'active' : ''; ?>"><svg class="nav-icon"><use href="#nav-categories"></use></svg>Categories</a>
     <?php endif; ?>
     
     <?php if (canAccess('archive')): ?>
-    <a href="?page=archive" class="<?php echo (isset($_GET['page']) && $_GET['page'] == 'archive') ? 'active' : ''; ?>"><span class="icon">📁</span> Archive</a>
+    <a href="?page=archive" class="<?php echo (isset($_GET['page']) && $_GET['page'] == 'archive') ? 'active' : ''; ?>"><svg class="nav-icon"><use href="#nav-archive"></use></svg>Archive</a>
     <?php endif; ?>
     
     <?php if (canAccess('customers')): ?>
-    <a href="?page=customers" class="<?php echo (isset($_GET['page']) && $_GET['page'] == 'customers') ? 'active' : ''; ?>"><span class="icon">👤</span> Customers</a>
+    <a href="?page=customers" class="<?php echo (isset($_GET['page']) && $_GET['page'] == 'customers') ? 'active' : ''; ?>"><svg class="nav-icon"><use href="#nav-customers"></use></svg>Customers</a>
     <?php endif; ?>
     
     <?php if (canAccess('sales')): ?>
-    <a href="?page=sales" class="<?php echo (isset($_GET['page']) && $_GET['page'] == 'sales') ? 'active' : ''; ?>"><span class="icon">📋</span> Sales</a>
+    <a href="?page=sales" class="<?php echo (isset($_GET['page']) && $_GET['page'] == 'sales') ? 'active' : ''; ?>"><svg class="nav-icon"><use href="#nav-sales"></use></svg>Sales</a>
     <?php endif; ?>
     
     <?php if (canAccess('reports') || canAccess('customer_reports') || canAccess('finance_reports')): ?>
@@ -576,11 +602,11 @@
     <?php endif; ?>
     
     <?php if (canAccess('reports')): ?>
-    <a href="?page=reports" class="<?php echo (isset($_GET['page']) && $_GET['page'] == 'reports') ? 'active' : ''; ?>"><span class="icon">📈</span> Reports</a>
+    <a href="?page=reports" class="<?php echo (isset($_GET['page']) && $_GET['page'] == 'reports') ? 'active' : ''; ?>"><svg class="nav-icon"><use href="#nav-reports"></use></svg>Reports</a>
     <?php endif; ?>
     
     <?php if (canAccess('customer_reports')): ?>
-    <a href="?page=customer_reports" class="<?php echo (isset($_GET['page']) && $_GET['page'] == 'customer_reports') ? 'active' : ''; ?>"><span class="icon">📊</span> Customer Reports</a>
+    <a href="?page=customer_reports" class="<?php echo (isset($_GET['page']) && $_GET['page'] == 'customer_reports') ? 'active' : ''; ?>"><svg class="nav-icon"><use href="#nav-customers"></use></svg>Customer Reports</a>
     <?php endif; ?>
     
     <?php if (canAccess('users') || canAccess('activity') || canAccess('settings')): ?>
@@ -588,15 +614,15 @@
     <?php endif; ?>
     
     <?php if (isAdmin()): ?>
-    <a href="?page=users&manage_roles=1" class="<?php echo (isset($_GET['page'], $_GET['manage_roles']) && $_GET['page'] == 'users' && $_GET['manage_roles'] == '1') ? 'active' : ''; ?>"><span class="icon">🛡️</span> Manage Roles</a>
+    <a href="?page=users&manage_roles=1" class="<?php echo (isset($_GET['page'], $_GET['manage_roles']) && $_GET['page'] == 'users' && $_GET['manage_roles'] == '1') ? 'active' : ''; ?>"><svg class="nav-icon"><use href="#nav-users"></use></svg>Manage Roles</a>
     <?php endif; ?>
     
     <?php if (canAccess('activity')): ?>
-    <a href="?page=activity" class="<?php echo (isset($_GET['page']) && $_GET['page'] == 'activity') ? 'active' : ''; ?>"><span class="icon">📋</span> Activity Log</a>
+    <a href="?page=activity" class="<?php echo (isset($_GET['page']) && $_GET['page'] == 'activity') ? 'active' : ''; ?>"><svg class="nav-icon"><use href="#nav-activity"></use></svg>Activity Log</a>
     <?php endif; ?>
     
     <?php if (canAccess('settings')): ?>
-    <a href="?page=settings" class="<?php echo (isset($_GET['page']) && $_GET['page'] == 'settings') ? 'active' : ''; ?>"><span class="icon">⚙️</span> Settings</a>
+    <a href="?page=settings" class="<?php echo (isset($_GET['page']) && $_GET['page'] == 'settings') ? 'active' : ''; ?>"><svg class="nav-icon"><use href="#nav-settings"></use></svg>Settings</a>
     <?php endif; ?>
 </nav>
         
@@ -617,8 +643,8 @@
                 $unreadCount = (int)$stmt->fetch()['count'];
             } catch (Exception $e) {}
         ?>
-        <a href="?page=notifications" style="display:flex;align-items:center;gap:8px;padding:10px 12px;margin:8px 12px;border-radius:8px;color:#94A3B8;text-decoration:none;font-size:13.5px;font-weight:600;<?php echo $unreadCount > 0 ? 'background:rgba(239,68,68,0.15);color:#F87171;' : ''; ?>">
-            <span style="font-size:16px;">🔔</span>
+        <a href="?page=notifications" class="sidebar-notifications" style="<?php echo $unreadCount > 0 ? 'background:rgba(239,68,68,0.15);color:#F87171;' : ''; ?>">
+            <svg class="nav-icon"><use href="#nav-notifications"></use></svg>
             Notifications
             <?php if ($unreadCount > 0): ?>
             <span style="margin-left:auto;background:#EF4444;color:white;padding:2px 8px;border-radius:999px;font-size:11px;font-weight:800;"><?php echo $unreadCount; ?></span>
@@ -636,8 +662,8 @@
                     <div class="role"><span class="badge <?php echo getRoleBadge($_SESSION['role']); ?>"><?php echo htmlspecialchars(getRoleLabel($_SESSION['role'])); ?></span></div>
                 </div>
             </div>
-            <a href="#" class="logout-btn" onclick="confirmLogout(event)">🚪 Logout</a>
-            <a href="#" class="switch-user-btn" onclick="switchUser()">🔄 Switch User</a>
+            <a href="#" class="logout-btn" onclick="confirmLogout(event)"><svg class="nav-icon"><use href="#nav-logout"></use></svg>Logout</a>
+            <a href="#" class="switch-user-btn" onclick="switchUser()"><svg class="nav-icon"><use href="#nav-switch"></use></svg>Switch User</a>
         </div>
     </div>
 
@@ -924,7 +950,7 @@
                 console.log('✅ Toast system loaded successfully!');
 
                 // ============================================
-                // CUSTOM CONFIRM MODAL - STEP 3
+                // Confirmation modal
                 // ============================================
 
                 var _confirmCallback = null;

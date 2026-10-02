@@ -368,11 +368,11 @@ class SaleManager {
             $this->pdo->beginTransaction();
             $invoice = 'SM-' . date('Ymd') . '-' . rand(1000, 9999);
             
-            $discount_amount = floatval($discount);
-            $total_with_discount = floatval($total) - $discount_amount;
-            if ($total_with_discount < 0) $total_with_discount = 0;
+            $gross_total = max(0, round(floatval($total), 2));
+            $discount_amount = min($gross_total, max(0, round(floatval($discount), 2)));
+            $total_with_discount = round($gross_total - $discount_amount, 2);
             
-            // Round all values to 2 decimal places to fix floating point issues
+            // Displayed product prices include VAT, so extract VAT from the final gross total.
             $vat = round($total_with_discount * ($tax_rate / (1 + $tax_rate)), 2);
             $subtotal_ex_vat = round($total_with_discount - $vat, 2);
             $total_rounded = round($total_with_discount, 2);
@@ -392,11 +392,27 @@ class SaleManager {
                 }
             }
             
+            // Make sure we actually have the stock before we touch anything
+            foreach ($items as $item) {
+                $stmt = $this->pdo->prepare("SELECT name, stock_quantity FROM products WHERE id = ?");
+                $stmt->execute([$item['id']]);
+                $product = $stmt->fetch();
+                if (!$product) {
+                    throw new Exception("Product not found for item");
+                }
+                if (intval($item['qty']) > intval($product['stock_quantity'])) {
+                    throw new Exception("Not enough stock for {$product['name']} (only {$product['stock_quantity']} left)");
+                }
+            }
+
             foreach ($items as $item) {
                 $stmt = $this->pdo->prepare("INSERT INTO sale_items (sale_id, product_id, quantity, unit_price, total_price) VALUES (?, ?, ?, ?, ?)");
                 $stmt->execute([$saleId, $item['id'], $item['qty'], $item['price'], round($item['qty'] * $item['price'], 2)]);
                 $stmt = $this->pdo->prepare("UPDATE products SET stock_quantity = stock_quantity - ? WHERE id = ?");
                 $stmt->execute([$item['qty'], $item['id']]);
+
+                $stockMove = $this->pdo->prepare("INSERT INTO stock_movements (product_id, movement_type, quantity, quantity_before, quantity_after, reason, reference_id, reference_type, user_id) SELECT ?, 'sale', ?, stock_quantity + ?, stock_quantity, CONCAT('Sale ', ?), ?, 'sale', ? FROM products WHERE id = ?");
+                $stockMove->execute([$item['id'], -$item['qty'], $item['qty'], $invoice, $saleId, $_SESSION['user_id'], $item['id']]);
             }
             $this->pdo->commit();
             
@@ -526,7 +542,8 @@ class ReportManager {
                 ORDER BY sold DESC 
                 LIMIT ?
             ");
-            $stmt->execute([$limit]);
+            $stmt->bindValue(1, (int)$limit, PDO::PARAM_INT);
+            $stmt->execute();
             $result = $stmt->fetchAll();
             
             if (empty($result)) {
@@ -544,7 +561,8 @@ class ReportManager {
                     ORDER BY p.name
                     LIMIT ?
                 ");
-                $stmt->execute([$limit]);
+                $stmt->bindValue(1, (int)$limit, PDO::PARAM_INT);
+                $stmt->execute();
                 $result = $stmt->fetchAll();
             }
             
@@ -754,15 +772,15 @@ class ActivityLogManager {
 }
 
 // ============================================
-// HR CLASS - COMPLETE FIXED VERSION
+// HR management class
 // ============================================
 
 // ============================================
-// HR CLASS - COMPLETE FIXED VERSION
+// HR management class
 // ============================================
 
 // ============================================
-// HR CLASS - COMPLETE FIXED VERSION
+// HR management class
 // ============================================
 
 class HRManager {
@@ -954,7 +972,7 @@ class HRManager {
                     $data['employee_id'],
                     $data['first_name'],
                     $data['last_name'],
-                    $data['email'] ?? '',
+                    !empty($data['email']) ? $data['email'] : null,
                     $data['phone'] ?? '',
                     $data['address'] ?? '',
                     $data['position'] ?? '',
@@ -984,7 +1002,7 @@ class HRManager {
                     $data['employee_id'],
                     $data['first_name'],
                     $data['last_name'],
-                    $data['email'] ?? '',
+                    !empty($data['email']) ? $data['email'] : null,
                     $data['phone'] ?? '',
                     $data['address'] ?? '',
                     $data['position'] ?? '',
@@ -1552,7 +1570,9 @@ class HRManager {
                 ORDER BY pn.sent_at DESC
                 LIMIT ?
             ");
-            $stmt->execute([$employee_id, $limit]);
+            $stmt->bindValue(1, $employee_id);
+            $stmt->bindValue(2, (int)$limit, PDO::PARAM_INT);
+            $stmt->execute();
             return $stmt->fetchAll();
         } catch(PDOException $e) {
             error_log("HRManager::getPayrollNotifications error: " . $e->getMessage());
@@ -1560,7 +1580,7 @@ class HRManager {
         }
     }
     
-} // ← END OF HRManager CLASS
+}
 
 // ============================================
 // FINANCE CLASS
@@ -1671,7 +1691,8 @@ class FinanceManager {
             ORDER BY total_spent DESC
             LIMIT ?
         ");
-        $stmt->execute([$limit]);
+        $stmt->bindValue(1, (int)$limit, PDO::PARAM_INT);
+        $stmt->execute();
         $result = $stmt->fetchAll();
         
         // If no results with sales, return customers with 0 orders
@@ -1689,7 +1710,8 @@ class FinanceManager {
                 ORDER BY name
                 LIMIT ?
             ");
-            $stmt->execute([$limit]);
+            $stmt->bindValue(1, (int)$limit, PDO::PARAM_INT);
+            $stmt->execute();
             return $stmt->fetchAll();
         }
         
@@ -1804,7 +1826,7 @@ class ReturnManager {
         }
 
                 // ============================================
-        // ADD THIS: CHECK FOR PREVIOUS RETURNS
+        // Check for previous returns on this sale
         // ============================================
         // Check if this sale already has a return
         // Check if this sale already has ANY return (including rejected)
@@ -1851,7 +1873,7 @@ class ReturnManager {
 // ============================================
 
         // ============================================
-        // ADD THIS: 20 HOUR RETURN TIME LIMIT CHECK
+        // Enforce the configured return time limit
         // ============================================
         $return_hours = getSetting('return_hours', 20);
         
@@ -1880,7 +1902,13 @@ class ReturnManager {
         // Calculate total refund - JUST ADD UP THE ITEMS
         $total_refund = 0;
         foreach ($items as $item) {
-            $total_refund += $item['refund_amount'];
+            if (isset($item['refund_amount']) && $item['refund_amount'] !== '') {
+                $total_refund += floatval($item['refund_amount']);
+            } else {
+                $unitPrice = isset($item['unit_price']) ? floatval($item['unit_price']) : 0;
+                $total_refund += floatval($item['quantity']) * $unitPrice;
+                $itemsById[$item['product_id']] = $unitPrice;
+            }
         }
         
         // Round to 2 decimal places
@@ -1915,7 +1943,16 @@ class ReturnManager {
         
         // Insert return items
         foreach ($items as $item) {
-            $refund_amount = round($item['quantity'] * $item['unit_price'], 2);
+            $unitPrice = isset($item['unit_price']) ? floatval($item['unit_price']) : 0;
+            if ($unitPrice <= 0) {
+                $stmt = $this->pdo->prepare("SELECT unit_price FROM sale_items WHERE sale_id = ? AND product_id = ? LIMIT 1");
+                $stmt->execute([$sale_id, $item['product_id']]);
+                $row = $stmt->fetch();
+                $unitPrice = $row ? floatval($row['unit_price']) : 0;
+            }
+            $refund_amount = isset($item['refund_amount']) && $item['refund_amount'] !== ''
+                ? round(floatval($item['refund_amount']), 2)
+                : round(floatval($item['quantity']) * $unitPrice, 2);
             
             $stmt = $this->pdo->prepare("
                 INSERT INTO return_items 
@@ -1955,13 +1992,17 @@ class ReturnManager {
             if (!$return) {
                 return ['success' => false, 'message' => 'Return not found'];
             }
-            
+
+            if ($return['status'] !== 'pending') {
+                return ['success' => false, 'message' => 'This return has already been ' . $return['status'] . '.'];
+            }
+
             $this->pdo->beginTransaction();
-            
+
             // Update return status
             $stmt = $this->pdo->prepare("
-                UPDATE returns 
-                SET status = 'approved', approved_by = ?, updated_at = NOW() 
+                UPDATE returns
+                SET status = 'approved', approved_by = ?, updated_at = NOW()
                 WHERE id = ?
             ");
             $stmt->execute([$approved_by, $return_id]);
@@ -1975,11 +2016,19 @@ class ReturnManager {
             
             foreach ($items as $item) {
                 $stmt = $this->pdo->prepare("
-                    UPDATE products 
-                    SET stock_quantity = stock_quantity + ? 
+                    UPDATE products
+                    SET stock_quantity = stock_quantity + ?
                     WHERE id = ?
                 ");
                 $stmt->execute([$item['quantity'], $item['product_id']]);
+
+                $stmt = $this->pdo->prepare("
+                    INSERT INTO stock_movements
+                    (product_id, movement_type, quantity, quantity_before, quantity_after, reason, reference_id, reference_type, user_id)
+                    SELECT ?, 'return', ?, stock_quantity - ?, stock_quantity, CONCAT('Return ', ?), ?, 'return', ?
+                    FROM products WHERE id = ?
+                ");
+                $stmt->execute([$item['product_id'], $item['quantity'], $item['quantity'], $return['return_number'], $return_id, $approved_by, $item['product_id']]);
             }
             
             // Mark as completed after approval

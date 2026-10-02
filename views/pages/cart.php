@@ -151,7 +151,7 @@ case 'cart':
                 <!-- Cart Totals -->
                 <div class="pos-cart-totals">
                     <div class="pos-total-row">
-                        <span class="pos-total-label">Subtotal</span>
+                        <span class="pos-total-label">Subtotal (VAT incl.)</span>
                         <span class="pos-total-value" id="subtotal">₱0.00</span>
                     </div>
                     <div class="pos-total-row pos-total-row-discount">
@@ -159,7 +159,7 @@ case 'cart':
                         <span class="pos-total-value" id="discountTotal">-₱0.00</span>
                     </div>
                     <div class="pos-total-row">
-                        <span class="pos-total-label">VAT (12%)</span>
+                        <span class="pos-total-label">VAT included (<?php echo htmlspecialchars(rtrim(rtrim(number_format((float)getSetting('tax_rate', 12), 2, '.', ''), '0'), '.')); ?>%)</span>
                         <span class="pos-total-value" id="tax">₱0.00</span>
                     </div>
                     <div class="pos-total-row pos-total-grand">
@@ -205,7 +205,7 @@ case 'cart':
             <!-- Payment Summary -->
             <div class="pos-payment-summary">
                 <div class="pos-payment-row">
-                    <span>Subtotal</span>
+                    <span>Subtotal (VAT incl.)</span>
                     <span id="paySubtotal">₱0.00</span>
                 </div>
                 <div class="pos-payment-row pos-payment-row-discount">
@@ -213,7 +213,7 @@ case 'cart':
                     <span id="payDiscount">-₱0.00</span>
                 </div>
                 <div class="pos-payment-row">
-                    <span>VAT (12%)</span>
+                    <span>VAT included (<?php echo htmlspecialchars(rtrim(rtrim(number_format((float)getSetting('tax_rate', 12), 2, '.', ''), '0'), '.')); ?>%)</span>
                     <span id="payTax">₱0.00</span>
                 </div>
                 <div class="pos-payment-row">
@@ -647,13 +647,12 @@ case 'cart':
                 container.innerHTML = '<div class="pos-cart-empty"><div class="pos-cart-empty-icon">🛒</div><div class="pos-cart-empty-title">Cart is empty</div><div class="pos-cart-empty-text">Click products to add them</div></div>';
             }
             
-            var effectiveDiscount = currentDiscount + currentLoyaltyPointsUsed;
-            var totalAfterDiscount = subtotal - effectiveDiscount;
-            if (totalAfterDiscount < 0) totalAfterDiscount = 0;
+            var effectiveDiscount = currentDiscount;
+            var totalAfterDiscount = Math.max(0, Math.round((subtotal - effectiveDiscount) * 100) / 100);
             
             var taxRate = <?php echo getSetting('tax_rate', 12); ?>;
-            var tax = totalAfterDiscount * (taxRate / 100);
-            var total = totalAfterDiscount + tax;
+            var tax = Math.round((totalAfterDiscount * ((taxRate / 100) / (1 + taxRate / 100))) * 100) / 100;
+            var total = totalAfterDiscount;
             
             currentSubtotal = subtotal;
             currentTax = tax;
@@ -672,7 +671,7 @@ case 'cart':
             currentTotal = Math.round(currentTotal * 100) / 100;
             if(cart.length === 0){ alert('Cart is empty!'); return; }
             document.getElementById('paySubtotal').textContent = '₱' + currentSubtotal.toFixed(2);
-            var effectiveDiscount = currentDiscount + currentLoyaltyPointsUsed;
+            var effectiveDiscount = currentDiscount;
             document.getElementById('payDiscount').textContent = '-₱' + effectiveDiscount.toFixed(2);
             document.getElementById('payTax').textContent = '₱' + currentTax.toFixed(2);
             document.getElementById('payLoyalty').textContent = currentLoyaltyPointsUsed + ' pts';
@@ -732,7 +731,7 @@ case 'cart':
             
             var change = Math.round((amountReceived - total) * 100) / 100;
             var customerId = document.getElementById('customerSelect').value;
-            var effectiveDiscount = currentDiscount + currentLoyaltyPointsUsed;
+            var effectiveDiscount = currentDiscount;
             
             // Build a beautiful confirmation modal
             showConfirm({
@@ -744,7 +743,7 @@ case 'cart':
                     // Move the actual fetch logic inside the callback
                     var data = new FormData();
                     data.append('items', JSON.stringify(cart));
-                    data.append('total', Math.round(total * 100) / 100);
+                    data.append('total', Math.round(currentSubtotal * 100) / 100);
                     data.append('customer_id', customerId);
                     data.append('amount_paid', amountReceived);
                     data.append('change', change);
@@ -802,15 +801,18 @@ case 'cart':
                     
                     var taxRate = <?php echo getSetting('tax_rate', 12); ?>;
                     var vatAmount = parseFloat(sale.tax).toFixed(2);
-                    var subtotalExVat = parseFloat(sale.subtotal).toFixed(2);
+                    var vatableSales = parseFloat(sale.subtotal).toFixed(2);
                     var totalAmount = parseFloat(sale.total_amount).toFixed(2);
+                    var grossSales = sale.items.reduce(function(sum, item) {
+                        return sum + parseFloat(item.total_price || 0);
+                    }, 0);
                     var amountPaid = parseFloat(sale.amount_paid || sale.total_amount).toFixed(2);
                     var changeAmount = parseFloat(sale.change_amount || 0).toFixed(2);
                     var discountAmount = parseFloat(sale.discount_amount || 0).toFixed(2);
                     var loyaltyPoints = parseFloat(sale.loyalty_points_used || 0).toFixed(0);
                     var storeAddress = '<?php echo addslashes(getSetting('store_address', '')); ?>';
                     var storeContact = '<?php echo addslashes(getSetting('store_contact', '')); ?>';
-                    var vatReg = '<?php echo addslashes(getSetting('vat_reg_number', '123-456-789-000')); ?>';
+                    var vatReg = '<?php echo addslashes(getSetting('vat_reg_number', '')); ?>';
                     var storeName = '<?php echo addslashes($store_name); ?>';
                     
                     container.innerHTML = 
@@ -826,19 +828,19 @@ case 'cart':
                             '<div class="pos-receipt-divider"></div>' +
                             '<div class="pos-receipt-items">' + itemsHtml + '</div>' +
                             '<div class="pos-receipt-divider"></div>' +
-                            (discountAmount > 0 ? '<div class="pos-receipt-row"><span>Discount</span><span>-₱' + discountAmount + '</span></div>' : '') +
-                            (loyaltyPoints > 0 ? '<div class="pos-receipt-row"><span>Loyalty Used</span><span>' + loyaltyPoints + ' pts</span></div>' : '') +
-                            '<div class="pos-receipt-row"><span>Subtotal</span><span>₱' + subtotalExVat + '</span></div>' +
-                            '<div class="pos-receipt-row"><span>VAT (' + taxRate + '%)</span><span>₱' + vatAmount + '</span></div>' +
-                            '<div class="pos-receipt-row pos-receipt-total"><span>TOTAL</span><span>₱' + totalAmount + '</span></div>' +
+                            '<div class="pos-receipt-row"><span>Subtotal (VAT inclusive)</span><span>₱' + grossSales.toFixed(2) + '</span></div>' +
+                            (discountAmount > 0 ? '<div class="pos-receipt-row"><span>Less: discount</span><span>-₱' + discountAmount + '</span></div>' : '') +
+                            (loyaltyPoints > 0 ? '<div class="pos-receipt-row"><span>Loyalty points used</span><span>' + loyaltyPoints + ' pts</span></div>' : '') +
+                            '<div class="pos-receipt-row pos-receipt-total"><span>TOTAL DUE</span><span>₱' + totalAmount + '</span></div>' +
                             '<div class="pos-receipt-divider"></div>' +
                             '<div class="pos-receipt-vat-summary">' +
-                                '<div class="pos-receipt-vat-heading">VAT RECEIPT SUMMARY</div>' +
-                                '<table><thead><tr><th>Rate</th><th>Net</th><th>VAT</th></tr></thead><tbody>' +
-                                    '<tr><td>' + taxRate + '% VAT</td><td>₱' + subtotalExVat + '</td><td>₱' + vatAmount + '</td></tr>' +
+                                '<div class="pos-receipt-vat-heading">VAT SUMMARY</div>' +
+                                '<table><tbody>' +
+                                    '<tr><td>VATable sales</td><td colspan="2">₱' + vatableSales + '</td></tr>' +
+                                    '<tr><td>VAT (' + taxRate + '% included)</td><td colspan="2">₱' + vatAmount + '</td></tr>' +
+                                    '<tr><td>Total sales</td><td colspan="2">₱' + totalAmount + '</td></tr>' +
                                 '</tbody></table>' +
-                                '<div class="pos-receipt-vat-total"><span>VAT TOTAL</span><strong>₱' + vatAmount + '</strong></div>' +
-                                (vatReg ? '<div class="pos-receipt-vat-number">VAT NO: ' + vatReg + '</div>' : '') +
+                                (vatReg ? '<div class="pos-receipt-vat-number">VAT REG. NO.: ' + vatReg + '</div>' : '') +
                             '</div>' +
                             '<div class="pos-receipt-divider"></div>' +
                             '<div class="pos-receipt-row"><span>Amount Paid</span><span>₱' + amountPaid + '</span></div>' +

@@ -335,11 +335,51 @@ case 'users':
                                 <input class="usr-form-input" id="customRoleName" maxlength="80" required>
                             </div>
                             <div class="usr-form-group">
-                                <label class="usr-form-label">Page access</label>
-                                <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;max-height:260px;overflow:auto;">
-                                    <?php foreach (getRolePermissionOptions() as $permissionKey => $permissionLabel): ?>
-                                    <label><input type="checkbox" name="customRolePermissions" value="<?php echo htmlspecialchars($permissionKey, ENT_QUOTES, 'UTF-8'); ?>"> <?php echo htmlspecialchars($permissionLabel); ?></label>
+                                <span class="usr-form-label">Page access</span>
+                                <p class="role-permission-help">Choose the sections and actions this role should be allowed to use.</p>
+                                <?php
+                                $rolePermissionOptions = getRolePermissionOptions();
+                                $rolePermissionGroups = [
+                                    'Sales & customers' => ['dashboard', 'cart', 'products', 'categories', 'archive', 'customers', 'sales', 'reports', 'customer_reports'],
+                                    'Inventory' => ['stock', 'stock_adjust', 'stock_history', 'purchases', 'purchases_create', 'purchases_view', 'suppliers', 'suppliers_create', 'suppliers_edit', 'inventory_reports'],
+                                    'Finance' => ['finance_dashboard', 'finance_reports', 'finance'],
+                                    'Returns' => ['returns', 'returns_create', 'returns_approve', 'returns_settings', 'returns_view', 'returns_reports'],
+                                    'People & system' => ['users', 'activity', 'settings', 'hr']
+                                ];
+                                $renderedPermissionKeys = [];
+                                ?>
+                                <div class="role-permission-list">
+                                    <?php foreach ($rolePermissionGroups as $groupName => $permissionKeys): ?>
+                                    <fieldset class="role-permission-group">
+                                        <legend><?php echo htmlspecialchars($groupName); ?></legend>
+                                        <div class="role-permission-options">
+                                            <?php foreach ($permissionKeys as $permissionKey): ?>
+                                                <?php if (!isset($rolePermissionOptions[$permissionKey])) continue; ?>
+                                                <?php $renderedPermissionKeys[] = $permissionKey; ?>
+                                                <label>
+                                                    <input type="checkbox" name="customRolePermissions" value="<?php echo htmlspecialchars($permissionKey, ENT_QUOTES, 'UTF-8'); ?>">
+                                                    <span><?php echo htmlspecialchars($rolePermissionOptions[$permissionKey]); ?></span>
+                                                </label>
+                                            <?php endforeach; ?>
+                                        </div>
+                                    </fieldset>
                                     <?php endforeach; ?>
+                                    <?php
+                                    $unassignedPermissions = array_diff_key($rolePermissionOptions, array_flip($renderedPermissionKeys));
+                                    if (!empty($unassignedPermissions)):
+                                    ?>
+                                    <fieldset class="role-permission-group">
+                                        <legend>Other access</legend>
+                                        <div class="role-permission-options">
+                                            <?php foreach ($unassignedPermissions as $permissionKey => $permissionLabel): ?>
+                                            <label>
+                                                <input type="checkbox" name="customRolePermissions" value="<?php echo htmlspecialchars($permissionKey, ENT_QUOTES, 'UTF-8'); ?>">
+                                                <span><?php echo htmlspecialchars($permissionLabel); ?></span>
+                                            </label>
+                                            <?php endforeach; ?>
+                                        </div>
+                                    </fieldset>
+                                    <?php endif; ?>
                                 </div>
                             </div>
                             <div class="usr-modal-actions">

@@ -17,7 +17,7 @@ case 'dashboard':
             <div class="dash-hero">
                 <div class="dash-hero-content">
                     <div class="dash-hero-text">
-                        <div class="dash-greeting">👋 Welcome back, <strong><?php echo htmlspecialchars(explode(' ', $_SESSION['full_name'])[0]); ?></strong></div>
+                        <div class="dash-greeting">Welcome back, <strong><?php echo htmlspecialchars(explode(' ', $_SESSION['full_name'])[0]); ?></strong></div>
                         <h1 class="dash-title">Admin Dashboard</h1>
                         <p class="dash-subtitle"><?php echo date('l, F j, Y'); ?> &middot; Here's what's happening today</p>
                     </div>

@@ -1,8 +1,5 @@
 <?php
-// ============================================
-// SMART MARKET POS - COMPLETE FIXED VERSION
-// WITH FINANCE ROLE - ALL ISSUES RESOLVED
-// ============================================
+// Application bootstrap: DB connection, settings, session, auth helpers
 
 error_reporting(E_ALL);
 ini_set('display_errors', 1);
@@ -377,7 +374,7 @@ function loginWithSavedAccount($userId) {
 }
 
 // ============================================
-// ROLE-BASED ACCESS CONTROL - UPDATED WITH FINANCE
+// Role-based access control
 // ============================================
 
 function getUserRoles($roleValue = null) {
@@ -423,7 +420,7 @@ function hasPermission($permission) {
     ],
     'cashier' => [
         'dashboard', 'cart', 'sales', 'customers',
-        'returns_create'  // ← ADD THIS - Cashiers can create returns
+        'returns_create'
     ],
     'inventory' => [
         'dashboard',
@@ -440,7 +437,7 @@ function hasPermission($permission) {
     'finance' => [
         'dashboard', 'finance_dashboard', 'finance_reports', 'finance',
         'returns', 'returns_approve', 'returns_reports',
-        'customer_reports'  // ← NEW
+        'customer_reports'
     ],
 ];
 
@@ -589,7 +586,7 @@ function logLogin($user_id, $username) {
     }
     
     $stmt = $pdo->prepare("INSERT INTO session_log (user_id, username, ip_address, user_agent) VALUES (?, ?, ?, ?)");
-    $stmt->execute([$user_id, $username, $_SERVER['REMOTE_ADDR'], $_SERVER['HTTP_USER_AGENT']]);
+    $stmt->execute([$user_id, $username, $_SERVER['REMOTE_ADDR'] ?? 'unknown', $_SERVER['HTTP_USER_AGENT'] ?? 'unknown']);
     $session_id = $pdo->lastInsertId();
     
     logActivity('login', 'User logged in', $user_id);

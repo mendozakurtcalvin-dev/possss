@@ -987,10 +987,10 @@ case 'finance_reports':
 
                     <?php
                 
-                  // ← THIS IS THE FIX
+
 
                 // ============================================
-                // RETURNS PAGE - ADD THIS AFTER finance_reports
+// RETURNS PAGE
                 // ============================================
 break;
 endswitch;

@@ -6,7 +6,7 @@ case 'activity':
                     echo '<div class="alert alert-danger">⛔ Access Denied. Admin only.</div>';
                     break;
                 }
-                $activityLog = $activityLogManager->getActivityLog(20);  // ← ONLY 20 MOST RECENT
+                $activityLog = $activityLogManager->getActivityLog(20);
                 $activityStats = $activityLogManager->getActivityStats();
                 $actionCounts = [];
                 foreach ($activityLog as $act) { 

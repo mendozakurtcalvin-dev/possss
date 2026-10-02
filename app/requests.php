@@ -90,7 +90,7 @@ if (isset($_GET['logout'])) {
 }
 
 // ============================================
-// AJAX HANDLER - UPDATED WITH FINANCE
+// AJAX request handlers
 // ============================================
 
 if (isset($_GET['action'])) {
@@ -369,7 +369,7 @@ if (isset($_GET['action'])) {
     }
 
                 // ============================================
-            // ADD THIS MISSING AJAX HANDLER
+            // Sales list endpoint
             // ============================================
 
             if ($_GET['action'] == 'get_sales') {
@@ -393,7 +393,7 @@ if (isset($_GET['action'])) {
     }
 
 // ============================================
-// END OF ADDED HANDLER
+
 // ============================================
     
     if ($_GET['action'] == 'get_sale' && isset($_GET['id'])) {
@@ -1664,7 +1664,7 @@ if (isset($_GET['action'])) {
     }
 
             // ============================================
-        // RETURNS AJAX HANDLERS - ADD THIS SECTION
+        // Returns endpoints
         // ============================================
 
         if ($_GET['action'] == 'create_return') {
