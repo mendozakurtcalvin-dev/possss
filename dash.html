@@ -1,0 +1,1166 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>👨‍💼 Admin - Smart Market</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <link rel="stylesheet" href="assets/css/app.css">
+</head>
+<body>
+
+<!-- ============================================ -->
+<!-- TOAST NOTIFICATION CONTAINER -->
+<!-- ============================================ -->
+<div class="toast-container" id="toastContainer"></div>
+
+    <button class="sidebar-toggle" onclick="toggleSidebar()">☰</button>
+    <div class="sidebar-overlay" id="sidebarOverlay" onclick="toggleSidebar()"></div>
+    
+    <div class="sidebar" id="sidebar">
+        <div class="sidebar-brand">
+            <div class="logo">
+                                    SM
+                            </div>
+            <div class="brand-text">Smart Market<small>Point of Sale</small></div>
+        </div>
+        
+      <nav class="sidebar-nav">
+    <div class="nav-label">Main</div>
+        <a href="?page=dashboard" class="active">Dashboard</a>
+        
+        <a href="?page=cart" class="">Cart</a>
+        
+    <div class="nav-label" style="margin-top:1rem;">Management</div>
+    
+        <a href="?page=finance_dashboard" class="">Finance</a>
+            <a href="?page=finance_reports" class="">Finance Reports</a>
+    
+
+        <a href="?page=returns" class="">Returns</a>
+        
+        
+    <!-- HR Sub-menu items - Always visible for HR-role users -->
+    <!-- HR Sub-menu items - Always visible for HR-role users -->
+    <!-- HR Sub-menu items - Always visible for HR-role users -->
+    
+            
+        <a href="?page=products" class="">Products</a>
+    
+        <a href="?page=stock" class="">Stock</a>
+    
+        <a href="?page=purchases" class="">Purchases</a>
+    
+        <a href="?page=suppliers" class="">Suppliers</a>
+    
+        <a href="?page=inventory_reports" class="">Inventory Reports</a>
+        
+        <a href="?page=categories" class="">Categories</a>
+        
+        <a href="?page=archive" class="">Archive</a>
+        
+        <a href="?page=customers" class="">Customers</a>
+        
+        <a href="?page=sales" class="">Sales</a>
+        
+        <div class="nav-label" style="margin-top:1rem;">Analytics</div>
+        
+        <a href="?page=reports" class="">Reports</a>
+        
+        <a href="?page=customer_reports" class="">Customer Reports</a>
+        
+        <div class="nav-label" style="margin-top:1rem;">System</div>
+        
+        <a href="?page=users&manage_roles=1" class="">Manage Roles</a>
+        
+        <a href="?page=activity" class="">Activity Log</a>
+        
+        <a href="?page=settings" class="">Settings</a>
+    </nav>
+        
+        <!-- 🔔 Inventory Notifications Link -->
+                
+        </nav>
+        
+        <div class="sidebar-footer">
+            <div class="user-info">
+                <div class="avatar">👤</div>
+                <div>
+                    <div class="name">Administrator</div>
+                    <div class="role"><span class="badge badge-primary">👨‍💼 Admin</span></div>
+                </div>
+            </div>
+            <a href="#" class="logout-btn" onclick="confirmLogout(event)">🚪 Logout</a>
+            <a href="#" class="switch-user-btn" onclick="switchUser()">🔄 Switch User</a>
+        </div>
+    </div>
+
+    <div class="modal logout-modal" id="logoutModal">
+    <div class="modal-content">
+        
+        <!-- Animated icon -->
+        <div class="logout-icon">
+            <div class="logout-icon-circle">
+                <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path>
+                    <polyline points="16 17 21 12 16 7"></polyline>
+                    <line x1="21" y1="12" x2="9" y2="12"></line>
+                </svg>
+            </div>
+        </div>
+        
+        <!-- Title -->
+        <h2 class="logout-title">Confirm Logout</h2>
+        
+        <!-- Subtitle -->
+        <p class="logout-subtitle">Are you sure you want to logout? You will need to sign in again to access the employee portal.</p>
+        
+        <!-- Action buttons -->
+        <div class="logout-actions">
+            <button class="logout-btn-cancel" onclick="closeModal('logoutModal')">
+                Cancel
+            </button>
+            <button class="logout-btn-confirm" onclick="proceedLogout()">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path>
+                    <polyline points="16 17 21 12 16 7"></polyline>
+                    <line x1="21" y1="12" x2="9" y2="12"></line>
+                </svg>
+                Yes, Logout
+            </button>
+        </div>
+        
+    </div>
+</div>
+
+    <!-- ============================================ -->
+<!-- SWITCH USER MODAL - CUSTOM DESIGN -->
+<!-- ============================================ -->
+        <div class="modal switch-user-modal" id="switchUserModal">
+        <div class="modal-content">
+            
+            <!-- Animated icon -->
+            <div class="switch-icon">
+                <div class="switch-icon-circle">
+                    <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path>
+                        <circle cx="8.5" cy="7" r="4"></circle>
+                        <polyline points="17 11 19 13 23 9"></polyline>
+                    </svg>
+                </div>
+            </div>
+            
+            <h2 class="switch-title">Switch Account</h2>
+            <p class="switch-subtitle">Choose a saved account to continue.</p>
+
+            <div class="saved-switch-list">
+                                                                <div style="padding:14px;border:1px solid #E2E8F0;border-radius:11px;color:#70798B;font-size:13px;">
+                    No saved accounts on this device. Use “Remember Me” when signing in to add one.
+                </div>
+                            </div>
+
+            <div class="saved-switch-actions">
+                <button type="button" class="switch-btn-cancel" onclick="closeModal('switchUserModal')">Cancel</button>
+                <button type="button" class="switch-btn-confirm" id="switchSignInAnother" onclick="proceedSwitchUser()">Sign in another account</button>
+            </div>
+            
+        </div>
+</div>
+
+    <script>
+        function toggleSidebar() {
+            document.getElementById('sidebar').classList.toggle('open');
+            document.getElementById('sidebarOverlay').classList.toggle('show');
+        }
+        
+        function confirmLogout(e) {
+            e.preventDefault();
+            document.getElementById('logoutModal').classList.add('show');
+        }
+        
+        function proceedLogout() {
+            window.location.href = '?logout=1';
+        }
+        
+        // Switch user - opens custom modal instead of browser alert
+        function switchUser() {
+            document.getElementById('switchUserModal').classList.add('show');
+        }
+
+        // Confirm switch user - performs the actual logout
+        function proceedSwitchUser() {
+            // Show loading state on button
+            var btn = document.getElementById('switchSignInAnother');
+            if (btn) {
+                btn.textContent = 'Signing out...';
+                btn.disabled = true;
+                btn.style.opacity = '0.8';
+            }
+            
+            // Redirect after short delay
+            setTimeout(function() {
+                window.location.href = '?logout=1';
+            }, 400);
+        }
+        
+        function closeModal(id) {
+            document.getElementById(id).classList.remove('show');
+        }
+        
+        document.getElementById('logoutModal').addEventListener('click', function(e) {
+            if (e.target === this) { closeModal('logoutModal'); }
+        });
+    </script>
+
+    <div class="main-content">
+                        <!-- ============================================ -->
+            <!-- DASHBOARD - PROFESSIONAL ADMIN VIEW -->
+            <!-- ============================================ -->
+
+            <!-- Welcome Hero -->
+            <div class="dash-hero">
+                <div class="dash-hero-content">
+                    <div class="dash-hero-text">
+                        <div class="dash-greeting">Welcome back, <strong>Administrator</strong></div>
+                        <h1 class="dash-title">Admin Dashboard</h1>
+                        <p class="dash-subtitle">Friday, October 2, 2026 &middot; Here's what's happening today</p>
+                    </div>
+                                            <div class="dash-hero-actions">
+                            <a href="?page=cart" class="dash-hero-btn">
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                                    <circle cx="9" cy="21" r="1"></circle>
+                                    <circle cx="20" cy="21" r="1"></circle>
+                                    <path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"></path>
+                                </svg>
+                                New Sale
+                            </a>
+                            <a href="?page=reports" class="dash-hero-btn dash-hero-btn-outline">
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                                    <line x1="18" y1="20" x2="18" y2="10"></line>
+                                    <line x1="12" y1="20" x2="12" y2="4"></line>
+                                    <line x1="6" y1="20" x2="6" y2="14"></line>
+                                </svg>
+                                View Reports
+                            </a>
+                        </div>
+                                        </div>
+            </div>
+
+            <!-- KPI Stats Grid -->
+            <!-- ============================================ -->
+                <!-- ROLE-AWARE KPI STATS GRID                    -->
+                <!-- Shows different cards based on user role     -->
+                <!-- ============================================ -->
+                
+                <div class="dash-stats">
+                    
+                                        
+                    <!-- ===== ADMIN: High-level overview ===== -->
+                    <div class="dash-stat">
+                        <div class="dash-stat-header">
+                            <div class="dash-stat-icon" style="background: linear-gradient(135deg, #10B981 0%, #059669 100%);">
+                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                                    <line x1="12" y1="1" x2="12" y2="23"></line>
+                                    <path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"></path>
+                                </svg>
+                            </div>
+                            <div class="dash-stat-trend dash-trend-up">Today</div>
+                        </div>
+                        <div class="dash-stat-label">Today's Sales</div>
+                        <div class="dash-stat-value">₱51.30</div>
+                        <div class="dash-stat-footer">1 transactions today</div>
+                    </div>
+                    
+                    <div class="dash-stat">
+                        <div class="dash-stat-header">
+                            <div class="dash-stat-icon" style="background: linear-gradient(135deg, #6366F1 0%, #4F46E5 100%);">
+                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                                    <line x1="18" y1="20" x2="18" y2="10"></line>
+                                    <line x1="12" y1="20" x2="12" y2="4"></line>
+                                    <line x1="6" y1="20" x2="6" y2="14"></line>
+                                </svg>
+                            </div>
+                            <div class="dash-stat-trend">Oct 2026</div>
+                        </div>
+                        <div class="dash-stat-label">Monthly Revenue</div>
+                        <div class="dash-stat-value">₱51.30</div>
+                        <div class="dash-stat-footer">Current month total</div>
+                    </div>
+                    
+                    <div class="dash-stat">
+                        <div class="dash-stat-header">
+                            <div class="dash-stat-icon" style="background: linear-gradient(135deg, #8B5CF6 0%, #7C3AED 100%);">
+                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                                    <polyline points="17 1 21 5 17 9"></polyline>
+                                    <path d="M3 11V9a4 4 0 0 1 4-4h14"></path>
+                                    <polyline points="7 23 3 19 7 15"></polyline>
+                                    <path d="M21 13v2a4 4 0 0 1-4 4H3"></path>
+                                </svg>
+                            </div>
+                            <div class="dash-stat-trend">All Time</div>
+                        </div>
+                        <div class="dash-stat-label">Total Transactions</div>
+                        <div class="dash-stat-value">7</div>
+                        <div class="dash-stat-footer">Across all cashiers</div>
+                    </div>
+                    
+                    <div class="dash-stat ">
+                        <div class="dash-stat-header">
+                            <div class="dash-stat-icon" style="background: linear-gradient(135deg, #F59E0B 0%, #D97706 100%);">
+                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                                    <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path>
+                                    <line x1="12" y1="9" x2="12" y2="13"></line>
+                                    <line x1="12" y1="17" x2="12.01" y2="17"></line>
+                                </svg>
+                            </div>
+                            <div class="dash-stat-trend ">All good</div>
+                        </div>
+                        <div class="dash-stat-label">Low Stock Items</div>
+                        <div class="dash-stat-value">0</div>
+                        <div class="dash-stat-footer">Products at stock ≤ 5</div>
+                    </div>
+                    
+                                        
+                </div>
+
+            <!-- Total Revenue Banner -->
+            <div class="dash-revenue-banner">
+                <div class="dash-revenue-icon">
+                    <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M12 2L2 7l10 5 10-5-10-5z"></path>
+                        <path d="M2 17l10 5 10-5"></path>
+                        <path d="M2 12l10 5 10-5"></path>
+                    </svg>
+                </div>
+                <div class="dash-revenue-content">
+                    <div class="dash-revenue-label">Total Revenue — All Time</div>
+                    <div class="dash-revenue-value">₱1,323.56</div>
+                    <div class="dash-revenue-sub">
+                        Calculated from 7 total transactions                    </div>
+                </div>
+                <div class="dash-revenue-badge">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                        <polyline points="23 6 13.5 15.5 8.5 10.5 1 18"></polyline>
+                        <polyline points="17 6 23 6 23 12"></polyline>
+                    </svg>
+                    Live
+                </div>
+            </div>
+
+            <!-- Chart + Quick Actions Grid -->
+            <div class="dash-grid-2col">
+                
+                <!-- Sales Chart -->
+                <div class="dash-card">
+                    <div class="dash-card-header">
+                        <div>
+                            <div class="dash-card-title" id="chartTitle">📈 Sales Overview</div>
+                            <div class="dash-card-subtitle">Compare performance across weeks</div>
+                        </div>
+                        <div class="dash-chart-filters">
+                            <button class="dash-filter-btn" onclick="updateChart('1week', this)">1W</button>
+                            <button class="dash-filter-btn" onclick="updateChart('2weeks', this)">2W</button>
+                            <button class="dash-filter-btn" onclick="updateChart('3weeks', this)">3W</button>
+                            <button class="dash-filter-btn active" onclick="updateChart('4weeks', this)">4W</button>
+                        </div>
+                    </div>
+                    <div class="dash-chart-wrapper">
+                        <canvas id="salesChart"></canvas>
+                    </div>
+                </div>
+                
+                <!-- Quick Actions -->
+                                <!-- ============================================ -->
+                <!-- QUICK ACTIONS - ROLE-AWARE -->
+                <!-- ============================================ -->
+                
+                <div class="dash-card">
+                    <div class="dash-card-header">
+                        <div>
+                            <div class="dash-card-title">⚡ Quick Actions</div>
+                            <div class="dash-card-subtitle">👨‍💼 Admin shortcuts</div>
+                        </div>
+                    </div>
+                    <div class="dash-quick-actions">
+                                                <a href="?page=cart" class="dash-quick-action">
+                            <div class="dash-quick-icon" style="background: linear-gradient(135deg, #6366F1 0%, #4F46E5 100%);">
+                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                                    <circle cx="9" cy="21" r="1"></circle><circle cx="20" cy="21" r="1"></circle><path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"></path>                                </svg>
+                            </div>
+                            <div class="dash-quick-text">
+                                <strong>New Sale</strong>
+                                <span>Open POS terminal</span>
+                            </div>
+                        </a>
+                                                <a href="?page=products" class="dash-quick-action">
+                            <div class="dash-quick-icon" style="background: linear-gradient(135deg, #10B981 0%, #059669 100%);">
+                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                                    <line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line>                                </svg>
+                            </div>
+                            <div class="dash-quick-text">
+                                <strong>Add Product</strong>
+                                <span>Create new item</span>
+                            </div>
+                        </a>
+                                                <a href="?page=reports" class="dash-quick-action">
+                            <div class="dash-quick-icon" style="background: linear-gradient(135deg, #8B5CF6 0%, #7C3AED 100%);">
+                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                                    <line x1="18" y1="20" x2="18" y2="10"></line><line x1="12" y1="20" x2="12" y2="4"></line><line x1="6" y1="20" x2="6" y2="14"></line>                                </svg>
+                            </div>
+                            <div class="dash-quick-text">
+                                <strong>View Reports</strong>
+                                <span>Analyze sales</span>
+                            </div>
+                        </a>
+                                                <a href="?page=users" class="dash-quick-action">
+                            <div class="dash-quick-icon" style="background: linear-gradient(135deg, #F59E0B 0%, #D97706 100%);">
+                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                                    <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M23 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path>                                </svg>
+                            </div>
+                            <div class="dash-quick-text">
+                                <strong>Manage Users</strong>
+                                <span>Staff & roles</span>
+                            </div>
+                        </a>
+                                            </div>
+                </div>
+                
+            </div>
+
+            <!-- Recent Sales -->
+            <!-- Recent Sales - Hidden for Inventory role -->
+                        <div class="dash-card">
+                <div class="dash-card-header">
+                    <div>
+                        <div class="dash-card-title">🕐 Recent Sales</div>
+                        <div class="dash-card-subtitle">Latest 5 transactions</div>
+                    </div>
+                    <a href="?page=sales" class="dash-view-all">
+                        View All
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+                            <polyline points="9 18 15 12 9 6"></polyline>
+                        </svg>
+                    </a>
+                </div>
+                
+                                <div class="dash-table-wrap">
+                    <table class="dash-table">
+                        <thead>
+                            <tr>
+                                <th>Invoice</th>
+                                <th>Cashier</th>
+                                <th>Customer</th>
+                                <th>Amount</th>
+                                <th>Change</th>
+                                <th>Time</th>
+                                <th>Status</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                                                        <tr>
+                                <td><span class="dash-invoice">SM-20261002-6360</span></td>
+                                <td>
+                                    <div class="dash-user-cell">
+                                        <div class="dash-user-avatar">A</div>
+                                        <span>Administrator</span>
+                                    </div>
+                                </td>
+                                <td>Walk-in</td>
+                                <td><strong class="dash-amount">₱51.30</strong></td>
+                                <td>₱0.00</td>
+                                <td class="dash-time">Oct 02, 22:45</td>
+                                <td><span class="dash-badge dash-badge-success">Paid</span></td>
+                            </tr>
+                                                        <tr>
+                                <td><span class="dash-invoice">SM-20260930-5618</span></td>
+                                <td>
+                                    <div class="dash-user-cell">
+                                        <div class="dash-user-avatar">R</div>
+                                        <span>Russel Infanso</span>
+                                    </div>
+                                </td>
+                                <td>Walk-in</td>
+                                <td><strong class="dash-amount">₱102.60</strong></td>
+                                <td>₱0.00</td>
+                                <td class="dash-time">Sep 30, 18:22</td>
+                                <td><span class="dash-badge dash-badge-success">Paid</span></td>
+                            </tr>
+                                                        <tr>
+                                <td><span class="dash-invoice">SM-20260930-5329</span></td>
+                                <td>
+                                    <div class="dash-user-cell">
+                                        <div class="dash-user-avatar">A</div>
+                                        <span>Administrator</span>
+                                    </div>
+                                </td>
+                                <td>Walk-in</td>
+                                <td><strong class="dash-amount">₱353.40</strong></td>
+                                <td>₱0.00</td>
+                                <td class="dash-time">Sep 30, 18:20</td>
+                                <td><span class="dash-badge dash-badge-success">Paid</span></td>
+                            </tr>
+                                                        <tr>
+                                <td><span class="dash-invoice">SM-20260930-2423</span></td>
+                                <td>
+                                    <div class="dash-user-cell">
+                                        <div class="dash-user-avatar">R</div>
+                                        <span>Russel Infanso</span>
+                                    </div>
+                                </td>
+                                <td>Walk-in</td>
+                                <td><strong class="dash-amount">₱51.30</strong></td>
+                                <td>₱0.00</td>
+                                <td class="dash-time">Sep 30, 16:09</td>
+                                <td><span class="dash-badge dash-badge-success">Paid</span></td>
+                            </tr>
+                                                        <tr>
+                                <td><span class="dash-invoice">SM-20260921-1809</span></td>
+                                <td>
+                                    <div class="dash-user-cell">
+                                        <div class="dash-user-avatar">R</div>
+                                        <span>Russel Infanso</span>
+                                    </div>
+                                </td>
+                                <td>Rodrigo Duterte</td>
+                                <td><strong class="dash-amount">₱50.40</strong></td>
+                                <td>₱49.60</td>
+                                <td class="dash-time">Sep 21, 20:47</td>
+                                <td><span class="dash-badge dash-badge-success">Paid</span></td>
+                            </tr>
+                                                    </tbody>
+                    </table>
+                </div>
+                                </div>
+                
+            <!-- Recent Activity -->
+            
+
+            <!-- Detail Modal (kept for stat card clicks) -->
+            <div class="modal" id="detailModal">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h2 id="detailTitle">Details</h2>
+                        <button class="close" onclick="closeModal('detailModal')">&times;</button>
+                    </div>
+                    <div style="text-align:center;padding:1rem 0;">
+                        <div style="font-size:3rem;font-weight:700;color:var(--primary-dark);" id="detailValue">-</div>
+                        <div style="color:var(--text-light);" id="detailDesc">-</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Dashboard JS (kept from before) -->
+            <script>
+                var chart = null;
+                var currentView = '4weeks';
+                
+                // ============================================
+                // CHART LOADING FUNCTIONS (kept from before)
+                // ============================================
+                
+                function loadSingleWeek() {
+                    var days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+                    fetch('?action=get_chart_data&days=7')
+                        .then(function(res) { return res.json(); })
+                        .then(function(data) {
+                            if (data.length === 0) { showEmptyChart(); return; }
+                            var weekTotals = data.map(function(d) { return parseFloat(d.total) || 0; });
+                            while (weekTotals.length < 7) weekTotals.push(0);
+                            var weekTotal = weekTotals.reduce(function(a, b) { return a + b; }, 0);
+                            var ctx = document.getElementById('salesChart').getContext('2d');
+                            if (chart) chart.destroy();
+                            document.getElementById('chartTitle').textContent = '📈 This Week · ₱' + weekTotal.toFixed(2);
+                            chart = new Chart(ctx, {
+                                type: 'line',
+                                data: { 
+                                    labels: days, 
+                                    datasets: [{ 
+                                        label: 'This Week', 
+                                        data: weekTotals, 
+                                        backgroundColor: 'rgba(99, 102, 241, 0.1)',
+                                        borderColor: '#6366F1',
+                                        borderWidth: 3,
+                                        pointBackgroundColor: '#6366F1',
+                                        pointBorderColor: '#FFFFFF',
+                                        pointBorderWidth: 3,
+                                        pointRadius: 5,
+                                        pointHoverRadius: 7,
+                                        tension: 0.4,
+                                        fill: true
+                                    }] 
+                                },
+                                options: {
+                                    responsive: true,
+                                    maintainAspectRatio: false,
+                                    plugins: {
+                                        legend: { display: false },
+                                        tooltip: {
+                                            backgroundColor: '#1E1B4B',
+                                            padding: 12,
+                                            titleFont: { size: 13, weight: 'bold' },
+                                            bodyFont: { size: 13 },
+                                            cornerRadius: 8,
+                                            callbacks: {
+                                                label: function(context) { return '₱' + context.parsed.y.toFixed(2); }
+                                            }
+                                        }
+                                    },
+                                    scales: {
+                                        y: {
+                                            beginAtZero: true,
+                                            grid: { color: '#F3F4F6', drawBorder: false },
+                                            ticks: {
+                                                font: { size: 11 },
+                                                color: '#9CA3AF',
+                                                callback: function(value) {
+                                                    if (value >= 1000) return '₱' + (value / 1000).toFixed(1) + 'k';
+                                                    return '₱' + value;
+                                                }
+                                            }
+                                        },
+                                        x: {
+                                            grid: { display: false },
+                                            ticks: { font: { size: 11 }, color: '#9CA3AF' }
+                                        }
+                                    }
+                                }
+                            });
+                        })
+                        ['catch'](function(error) { console.error(error); showEmptyChart(); });
+                }
+                
+                function loadTwoWeeks() {
+                    var days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+                    fetch('?action=get_chart_data&days=14')
+                        .then(function(res) { return res.json(); })
+                        .then(function(allData) {
+                            if (allData.length === 0) { showEmptyChart(); return; }
+                            var datasets = [];
+                            var colors = [
+                                { bg: 'rgba(99, 102, 241, 0.1)', border: '#6366F1' },
+                                { bg: 'rgba(139, 92, 246, 0.1)', border: '#8B5CF6' }
+                            ];
+                            for (var w = 0; w < 2; w++) {
+                                var start = w * 7;
+                                var end = Math.min(start + 7, allData.length);
+                                var weekData = allData.slice(start, end);
+                                var weekTotals = weekData.map(function(d) { return parseFloat(d.total) || 0; });
+                                while (weekTotals.length < 7) weekTotals.push(0);
+                                var weekTotal = weekTotals.reduce(function(a, b) { return a + b; }, 0);
+                                datasets.push({ 
+                                    label: 'Week ' + (w + 1) + ' · ₱' + weekTotal.toFixed(2), 
+                                    data: weekTotals, 
+                                    backgroundColor: colors[w].bg,
+                                    borderColor: colors[w].border,
+                                    borderWidth: 3,
+                                    pointBackgroundColor: colors[w].border,
+                                    pointBorderColor: '#FFFFFF',
+                                    pointBorderWidth: 3,
+                                    pointRadius: 5,
+                                    tension: 0.4,
+                                    fill: true
+                                });
+                            }
+                            renderMultiChart(days, datasets, '📈 2-Week Comparison');
+                        })
+                        ['catch'](function(error) { console.error(error); showEmptyChart(); });
+                }
+                
+                function loadThreeWeeks() {
+                    var days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+                    fetch('?action=get_chart_data&days=21')
+                        .then(function(res) { return res.json(); })
+                        .then(function(allData) {
+                            if (allData.length === 0) { showEmptyChart(); return; }
+                            var datasets = [];
+                            var colors = [
+                                { bg: 'rgba(99, 102, 241, 0.1)', border: '#6366F1' },
+                                { bg: 'rgba(139, 92, 246, 0.1)', border: '#8B5CF6' },
+                                { bg: 'rgba(16, 185, 129, 0.1)', border: '#10B981' }
+                            ];
+                            for (var w = 0; w < 3; w++) {
+                                var start = w * 7;
+                                var end = Math.min(start + 7, allData.length);
+                                var weekData = allData.slice(start, end);
+                                var weekTotals = weekData.map(function(d) { return parseFloat(d.total) || 0; });
+                                while (weekTotals.length < 7) weekTotals.push(0);
+                                var weekTotal = weekTotals.reduce(function(a, b) { return a + b; }, 0);
+                                datasets.push({ 
+                                    label: 'Week ' + (w + 1) + ' · ₱' + weekTotal.toFixed(2), 
+                                    data: weekTotals, 
+                                    backgroundColor: colors[w].bg,
+                                    borderColor: colors[w].border,
+                                    borderWidth: 3,
+                                    pointBackgroundColor: colors[w].border,
+                                    pointBorderColor: '#FFFFFF',
+                                    pointBorderWidth: 3,
+                                    pointRadius: 5,
+                                    tension: 0.4,
+                                    fill: true
+                                });
+                            }
+                            renderMultiChart(days, datasets, '📈 3-Week Comparison');
+                        })
+                        ['catch'](function(error) { console.error(error); showEmptyChart(); });
+                }
+                
+                function loadFourWeeks() {
+                    var days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+                    fetch('?action=get_chart_data&days=28')
+                        .then(function(res) { return res.json(); })
+                        .then(function(allData) {
+                            if (allData.length === 0) { showEmptyChart(); return; }
+                            var datasets = [];
+                            var colors = [
+                                { bg: 'rgba(99, 102, 241, 0.1)', border: '#6366F1' },
+                                { bg: 'rgba(139, 92, 246, 0.1)', border: '#8B5CF6' },
+                                { bg: 'rgba(16, 185, 129, 0.1)', border: '#10B981' },
+                                { bg: 'rgba(245, 158, 11, 0.1)', border: '#F59E0B' }
+                            ];
+                            for (var w = 0; w < 4; w++) {
+                                var start = w * 7;
+                                var end = Math.min(start + 7, allData.length);
+                                var weekData = allData.slice(start, end);
+                                var weekTotals = weekData.map(function(d) { return parseFloat(d.total) || 0; });
+                                while (weekTotals.length < 7) weekTotals.push(0);
+                                var weekTotal = weekTotals.reduce(function(a, b) { return a + b; }, 0);
+                                datasets.push({ 
+                                    label: 'Week ' + (w + 1) + ' · ₱' + weekTotal.toFixed(2), 
+                                    data: weekTotals, 
+                                    backgroundColor: colors[w].bg,
+                                    borderColor: colors[w].border,
+                                    borderWidth: 3,
+                                    pointBackgroundColor: colors[w].border,
+                                    pointBorderColor: '#FFFFFF',
+                                    pointBorderWidth: 3,
+                                    pointRadius: 5,
+                                    tension: 0.4,
+                                    fill: true
+                                });
+                            }
+                            renderMultiChart(days, datasets, '📈 4-Week Comparison');
+                        })
+                        ['catch'](function(error) { console.error(error); showEmptyChart(); });
+                }
+                
+                function renderMultiChart(days, datasets, title) {
+                    var ctx = document.getElementById('salesChart').getContext('2d');
+                    if (chart) chart.destroy();
+                    document.getElementById('chartTitle').textContent = title;
+                    chart = new Chart(ctx, {
+                        type: 'line',
+                        data: { labels: days, datasets: datasets },
+                        options: {
+                            responsive: true,
+                            maintainAspectRatio: false,
+                            plugins: {
+                                legend: {
+                                    position: 'top',
+                                    align: 'end',
+                                    labels: {
+                                        font: { size: 11, weight: '600' },
+                                        color: '#4B5563',
+                                        padding: 12,
+                                        usePointStyle: true,
+                                        pointStyle: 'circle',
+                                        boxWidth: 8
+                                    }
+                                },
+                                tooltip: {
+                                    backgroundColor: '#1E1B4B',
+                                    padding: 12,
+                                    titleFont: { size: 13, weight: 'bold' },
+                                    bodyFont: { size: 13 },
+                                    cornerRadius: 8
+                                }
+                            },
+                            scales: {
+                                y: {
+                                    beginAtZero: true,
+                                    grid: { color: '#F3F4F6', drawBorder: false },
+                                    ticks: {
+                                        font: { size: 11 },
+                                        color: '#9CA3AF',
+                                        callback: function(value) {
+                                            if (value >= 1000) return '₱' + (value / 1000).toFixed(1) + 'k';
+                                            return '₱' + value;
+                                        }
+                                    }
+                                },
+                                x: {
+                                    grid: { display: false },
+                                    ticks: { font: { size: 11 }, color: '#9CA3AF' }
+                                }
+                            }
+                        }
+                    });
+                }
+                
+                function showEmptyChart() {
+                    var ctx = document.getElementById('salesChart').getContext('2d');
+                    if (chart) chart.destroy();
+                    document.getElementById('chartTitle').textContent = '📈 No Data Available';
+                    chart = new Chart(ctx, {
+                        type: 'line',
+                        data: { 
+                            labels: ['No Data'], 
+                            datasets: [{ 
+                                label: 'No sales yet',
+                                data: [0], 
+                                borderColor: '#E5E7EB',
+                                backgroundColor: 'rgba(229, 231, 235, 0.2)',
+                                borderWidth: 3,
+                                pointRadius: 0,
+                                fill: true
+                            }] 
+                        },
+                        options: { 
+                            responsive: true, 
+                            maintainAspectRatio: false, 
+                            plugins: { legend: { display: false } },
+                            scales: {
+                                y: { beginAtZero: true, grid: { color: '#F3F4F6' }, ticks: { color: '#9CA3AF' } },
+                                x: { grid: { display: false }, ticks: { color: '#9CA3AF' } }
+                            }
+                        }
+                    });
+                }
+                
+                function updateChart(mode, btn) {
+                    document.querySelectorAll('.dash-filter-btn').forEach(function(b) { b.classList.remove('active'); });
+                    if (btn) btn.classList.add('active');
+                    currentView = mode;
+                    if (mode === '1week') loadSingleWeek();
+                    else if (mode === '2weeks') loadTwoWeeks();
+                    else if (mode === '3weeks') loadThreeWeeks();
+                    else if (mode === '4weeks') loadFourWeeks();
+                }
+                
+                // Init chart
+                setTimeout(function() { loadFourWeeks(); }, 100);
+                
+                // Stat detail modal
+                function showStatDetail(title, value, description) {
+                    document.getElementById('detailTitle').textContent = title;
+                    document.getElementById('detailValue').textContent = value;
+                    document.getElementById('detailDesc').textContent = description;
+                    document.getElementById('detailModal').classList.add('show');
+                }
+                
+                function closeModal(id) { document.getElementById(id).classList.remove('show'); }
+            </script>
+                    </div>
+
+        <script>
+                // ============================================
+                // TOAST NOTIFICATION SYSTEM - GLOBAL
+                // ============================================
+
+                window.showToast = function(type, title, message, duration) {
+                    if (!duration) duration = 4000;
+                    
+                    var container = document.getElementById('toastContainer');
+                    if (!container) {
+                        container = document.createElement('div');
+                        container.id = 'toastContainer';
+                        container.style.cssText = 'position:fixed;top:24px;right:24px;z-index:99999;display:flex;flex-direction:column;gap:12px;max-width:420px;width:calc(100% - 48px);pointer-events:none;';
+                        document.body.appendChild(container);
+                    }
+                    
+                    var icons = {
+                        success: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>',
+                        error: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>',
+                        warning: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>',
+                        info: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>'
+                    };
+                    
+                    var colors = {
+                        success: { border: '#10B981', bg: '#ECFDF5', color: '#10B981' },
+                        error: { border: '#EF4444', bg: '#FEF2F2', color: '#EF4444' },
+                        warning: { border: '#F59E0B', bg: '#FFFBEB', color: '#F59E0B' },
+                        info: { border: '#6366F1', bg: '#EEF2FF', color: '#6366F1' }
+                    };
+                    
+                    var c = colors[type] || colors.info;
+                    
+                    var toast = document.createElement('div');
+                    toast.style.cssText = 'display:flex;align-items:flex-start;gap:14px;padding:16px 18px;background:#FFFFFF;border-radius:14px;box-shadow:0 20px 50px rgba(30,27,75,0.15),0 8px 20px rgba(30,27,75,0.1),0 0 0 1px rgba(30,27,75,0.05);border-left:4px solid ' + c.border + ';pointer-events:auto;animation:toastSlideIn 0.4s cubic-bezier(0.4,0,0.2,1);font-family:Inter,-apple-system,sans-serif;';
+                    toast.innerHTML = 
+                        '<div style="width:40px;height:40px;border-radius:10px;background:' + c.bg + ';color:' + c.color + ';display:flex;align-items:center;justify-content:center;flex-shrink:0;">' + (icons[type] || icons.info) + '</div>' +
+                        '<div style="flex:1;min-width:0;">' +
+                            '<div style="font-size:14px;font-weight:700;color:#111827;letter-spacing:-0.01em;margin-bottom:3px;line-height:1.3;">' + title + '</div>' +
+                            (message ? '<div style="font-size:13px;color:#6B7280;line-height:1.5;font-weight:500;word-wrap:break-word;">' + message + '</div>' : '') +
+                        '</div>' +
+                        '<button onclick="this.parentElement.remove()" style="width:24px;height:24px;border-radius:6px;background:transparent;border:none;color:#9CA3AF;cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:18px;font-weight:300;line-height:1;padding:0;flex-shrink:0;">&times;</button>';
+                    
+                    container.appendChild(toast);
+                    
+                    var dismissTimer = setTimeout(function() {
+                        if (toast.parentElement) {
+                            toast.style.opacity = '0';
+                            toast.style.transform = 'translateX(100%)';
+                            toast.style.transition = 'all 0.3s';
+                            setTimeout(function() { if (toast.parentElement) toast.remove(); }, 300);
+                        }
+                    }, duration);
+                    
+                    toast.addEventListener('mouseenter', function() { clearTimeout(dismissTimer); });
+                    toast.addEventListener('mouseleave', function() {
+                        dismissTimer = setTimeout(function() {
+                            if (toast.parentElement) {
+                                toast.style.opacity = '0';
+                                toast.style.transform = 'translateX(100%)';
+                                toast.style.transition = 'all 0.3s';
+                                setTimeout(function() { if (toast.parentElement) toast.remove(); }, 300);
+                            }
+                        }, 1500);
+                    });
+                };
+
+                window.dismissToast = function(toast) {
+                    if (!toast) return;
+                    toast.style.opacity = '0';
+                    toast.style.transform = 'translateX(100%)';
+                    toast.style.transition = 'all 0.3s';
+                    setTimeout(function() { if (toast.parentElement) toast.remove(); }, 300);
+                };
+
+                // Inject animation
+                (function() {
+                    var style = document.createElement('style');
+                    style.textContent = '@keyframes toastSlideIn{from{opacity:0;transform:translateX(100%) scale(0.9)}to{opacity:1;transform:translateX(0) scale(1)}}';
+                    document.head.appendChild(style);
+                })();
+
+                // Override window.alert
+                window.alert = function(message) {
+                    if (!message) return;
+                    
+                    var msg = String(message);
+                    var type = 'info';
+                    var title = 'Notice';
+                    
+                    if (/error|❌|failed|cannot|invalid|expired|unauthorized/i.test(msg)) {
+                        type = 'error';
+                        title = 'Error';
+                    } else if (/warning|⚠️|⏰|already|not enough|low stock/i.test(msg)) {
+                        type = 'warning';
+                        title = 'Warning';
+                    } else if (/success|✅|saved|added|completed|approved|deleted|updated/i.test(msg)) {
+                        type = 'success';
+                        title = 'Success';
+                    }
+                    
+                    var clean = msg.replace(/^[✅❌⚠️⏰🔄💰📋📦👤🎉🚪🔑]+\s*/g, '').replace(/^error:\s*/i, '').replace(/^success:\s*/i, '').replace(/^warning:\s*/i, '').trim();
+                    
+                    window.showToast(type, title, clean);
+                };
+
+                // ============================================
+                // REPLACE NATIVE CONFIRM WITH CUSTOM MODAL
+                // ============================================
+
+                // Override window.confirm to auto-show a custom modal
+                // Note: This changes confirm() to non-blocking, so we need to handle it differently
+                // For existing code, we'll create a helper that existing functions can use
+                window.customConfirm = function(message, callback, variant) {
+                    // Auto-detect variant from message
+                    var v = variant || 'info';
+                    var lower = String(message).toLowerCase();
+                    if (/delete|remove|permanently/i.test(message)) v = 'danger';
+                    else if (/archive/i.test(message)) v = 'warning';
+                    else if (/restore|approve/i.test(message)) v = 'success';
+                    
+                    // Auto-detect title
+                    var title = 'Confirm Action';
+                    if (/delete|remove/i.test(message)) title = 'Delete Item?';
+                    else if (/archive/i.test(message)) title = 'Archive Item?';
+                    else if (/restore/i.test(message)) title = 'Restore Item?';
+                    else if (/logout|switch/i.test(message)) title = 'Confirm Action';
+                    
+                    // Auto-detect button text
+                    var confirmText = 'Confirm';
+                    if (/delete|remove/i.test(message)) confirmText = 'Delete';
+                    else if (/archive/i.test(message)) confirmText = 'Archive';
+                    else if (/restore/i.test(message)) confirmText = 'Restore';
+                    
+                    showConfirm({
+                        title: title,
+                        message: message,
+                        confirmText: confirmText,
+                        variant: v,
+                        onConfirm: callback
+                    });
+                };
+
+                console.log('✅ Toast system loaded successfully!');
+
+                // ============================================
+                // Confirmation modal
+                // ============================================
+
+                var _confirmCallback = null;
+
+                window.showConfirm = function(options) {
+                    options = options || {};
+                    
+                    var title = options.title || 'Are you sure?';
+                    var message = options.message || 'This action cannot be undone.';
+                    var confirmText = options.confirmText || 'Confirm';
+                    var variant = options.variant || 'info';
+                    
+                    var iconMap = {
+                        'danger': '<svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>',
+                        'warning': '<svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>',
+                        'success': '<svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>',
+                        'info': '<svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>'
+                    };
+                    
+                    var modal = document.getElementById('confirmModal');
+                    if (!modal) {
+                        // Fallback to native confirm if modal doesn't exist
+                        if (window.confirm(message)) {
+                            if (typeof options.onConfirm === 'function') options.onConfirm();
+                        }
+                        return;
+                    }
+                    
+                    document.getElementById('confirmTitle').textContent = title;
+                    document.getElementById('confirmMessage').textContent = message;
+                    document.getElementById('confirmOkText').textContent = confirmText;
+                    document.getElementById('confirmIcon').innerHTML = iconMap[variant] || iconMap.info;
+                    
+                    document.getElementById('confirmIcon').className = 'confirm-icon confirm-' + variant;
+                    document.getElementById('confirmOkBtn').className = 'confirm-btn-ok confirm-btn-' + variant;
+                    
+                    _confirmCallback = options.onConfirm || null;
+                    modal.classList.add('show');
+                };
+
+                window.closeConfirm = function() {
+                    var modal = document.getElementById('confirmModal');
+                    if (modal) modal.classList.remove('show');
+                    _confirmCallback = null;
+                };
+
+                window.confirmProceed = function() {
+                    var cb = _confirmCallback;
+                    closeConfirm();
+                    if (typeof cb === 'function') {
+                        cb();
+                    }
+                };
+
+                // Auto-detect variant helper
+                window.customConfirm = function(message, callback, variant) {
+                    var v = variant || 'info';
+                    if (/delete|remove|permanently/i.test(message)) v = 'danger';
+                    else if (/archive/i.test(message)) v = 'warning';
+                    else if (/restore|approve/i.test(message)) v = 'success';
+                    
+                    var title = 'Confirm Action';
+                    if (/delete|remove/i.test(message)) title = 'Delete Item?';
+                    else if (/archive/i.test(message)) title = 'Archive Item?';
+                    else if (/restore/i.test(message)) title = 'Restore Item?';
+                    
+                    var confirmText = 'Confirm';
+                    if (/delete|remove/i.test(message)) confirmText = 'Delete';
+                    else if (/archive/i.test(message)) confirmText = 'Archive';
+                    else if (/restore/i.test(message)) confirmText = 'Restore';
+                    
+                    showConfirm({
+                        title: title,
+                        message: message,
+                        confirmText: confirmText,
+                        variant: v,
+                        onConfirm: callback
+                    });
+                };
+
+                // Attach outside click to confirm modal (if it exists)
+                (function() {
+                    var modal = document.getElementById('confirmModal');
+                    if (modal) {
+                        modal.addEventListener('click', function(e) {
+                            if (e.target === this) {
+                                closeConfirm();
+                            }
+                        });
+                    }
+                })();
+
+                console.log('✅ Custom confirm system loaded');
+
+        </script>
+
+<!-- ============================================ -->
+<!-- UNIVERSAL CONFIRMATION MODAL -->
+<!-- ============================================ -->
+<div class="modal" id="confirmModal">
+    <div class="modal-content confirm-modal-content">
+        
+        <div class="confirm-icon-wrap" id="confirmIconWrap">
+            <div class="confirm-icon" id="confirmIcon">
+                <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path>
+                    <line x1="12" y1="9" x2="12" y2="13"></line>
+                    <line x1="12" y1="17" x2="12.01" y2="17"></line>
+                </svg>
+            </div>
+        </div>
+        
+        <h2 class="confirm-title" id="confirmTitle">Are you sure?</h2>
+        <p class="confirm-message" id="confirmMessage">This action cannot be undone.</p>
+        
+        <div class="confirm-actions">
+            <button type="button" class="confirm-btn-cancel" onclick="closeConfirm()">
+                Cancel
+            </button>
+            <button type="button" class="confirm-btn-ok" id="confirmOkBtn" onclick="confirmProceed()">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+                    <polyline points="20 6 9 17 4 12"></polyline>
+                </svg>
+                <span id="confirmOkText">Confirm</span>
+            </button>
+        </div>
+        
+    </div>
+</div>
+
+<script>
+// ============================================
+// SIDEBAR SCROLL POSITION PERSISTENCE
+// Keeps sidebar scroll position when clicking links
+// ============================================
+(function() {
+    var sidebar = document.querySelector('.sidebar-nav');
+    if (!sidebar) return;
+    
+    // Restore saved scroll position on page load
+    var savedScroll = sessionStorage.getItem('sidebarScroll');
+    if (savedScroll !== null) {
+        sidebar.scrollTop = parseInt(savedScroll, 10);
+    }
+    
+    // Auto-scroll the active link into view on load
+    var activeLink = sidebar.querySelector('a.active');
+    if (activeLink) {
+        activeLink.scrollIntoView({ block: 'nearest', behavior: 'auto' });
+    }
+    
+    // Save scroll position when leaving the page
+    window.addEventListener('beforeunload', function() {
+        sessionStorage.setItem('sidebarScroll', sidebar.scrollTop);
+    });
+    
+    // Also save on link click (in case beforeunload doesn't fire in some browsers)
+    sidebar.querySelectorAll('a').forEach(function(link) {
+        link.addEventListener('click', function() {
+            sessionStorage.setItem('sidebarScroll', sidebar.scrollTop);
+        });
+    });
+})();
+</script>
+
+</body>
+</html>

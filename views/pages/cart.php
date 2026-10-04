@@ -44,6 +44,7 @@ case 'cart':
                     </svg>
                 </span>
                 <input type="text" id="searchProduct" placeholder="Search products..." onkeyup="searchProducts()" class="pos-search-input">
+                <input type="text" id="barcodeInput" placeholder="Scan / type barcode + Enter" onkeydown="if(event.key==='Enter'){scanBarcode();event.preventDefault();}" class="pos-search-input" style="max-width:220px;">
                 <button type="button" class="pos-search-clear" onclick="clearSearch()" title="Clear search">
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
                         <line x1="18" y1="6" x2="6" y2="18"></line>
@@ -226,6 +227,21 @@ case 'cart':
                 </div>
             </div>
             
+            <!-- Payment Method -->
+            <div class="pos-amount-section">
+                <label class="pos-amount-label">Payment Method</label>
+                <select id="paymentMethod" class="pos-amount-input" onchange="toggleCardTokens()" style="height:auto;padding:0.6rem;">
+                    <option value="cash">Cash</option>
+                    <option value="card">Card (tokenized)</option>
+                    <option value="gcash">GCash</option>
+                    <option value="other">Other</option>
+                </select>
+            </div>
+            <div class="pos-amount-section" id="cardTokenRow" style="display:none;">
+                <label class="pos-amount-label">Saved Card Token</label>
+                <select id="cardTokenSelect" class="pos-amount-input" style="height:auto;padding:0.6rem;"></select>
+            </div>
+
             <!-- Amount Input -->
             <div class="pos-amount-section">
                 <label class="pos-amount-label">
@@ -539,6 +555,19 @@ case 'cart':
             });
         }
         
+        function scanBarcode(){
+            var term = document.getElementById('barcodeInput').value.trim();
+            if (!term) return;
+            var match = (products || []).find(function(p){ return p.barcode && String(p.barcode) === term; });
+            if (match) {
+                addToCart(match);
+                document.getElementById('barcodeInput').value = '';
+                if (typeof showToast === 'function') showToast('success', 'Added', match.name + ' added via barcode', 2000);
+            } else {
+                alert('No product found with barcode: ' + term);
+            }
+        }
+
         function searchProducts(){
             var term = document.getElementById('searchProduct').value.toLowerCase();
             var filtered = products.filter(function(p) { return p.name.toLowerCase().indexOf(term) !== -1 && p.stock_quantity > 0; });
@@ -715,20 +744,52 @@ case 'cart':
             calculateChange();
         }
         
+        function toggleCardTokens(){
+            var method = document.getElementById('paymentMethod').value;
+            document.getElementById('cardTokenRow').style.display = (method === 'card') ? 'block' : 'none';
+            if (method === 'card') loadCardTokens();
+        }
+
+        function loadCardTokens(){
+            fetch('?action=get_payment_tokens').then(function(r){return r.json();}).then(function(rows){
+                var sel = document.getElementById('cardTokenSelect');
+                sel.innerHTML = '';
+                rows.filter(function(t){ return t.active == 1; }).forEach(function(t){
+                    var o = document.createElement('option');
+                    o.value = t.id;
+                    o.textContent = t.card_brand + ' ****' + t.last4 + (t.customer_name ? ' (' + t.customer_name + ')' : '');
+                    sel.appendChild(o);
+                });
+                if (!sel.options.length) {
+                    var o = document.createElement('option');
+                    o.value = ''; o.textContent = 'No saved tokens - tokenize a card first';
+                    sel.appendChild(o);
+                }
+            });
+        }
+
         function processPayment(){
+            var paymentMethod = document.getElementById('paymentMethod') ? document.getElementById('paymentMethod').value : 'cash';
+            var paymentTokenId = (paymentMethod === 'card' && document.getElementById('cardTokenSelect')) ? document.getElementById('cardTokenSelect').value : '';
             var amountReceived = Math.round((parseFloat(document.getElementById('amountReceived').value) || 0) * 100) / 100;
             var total = currentTotal;
-            
+
+            if (paymentMethod === 'card') { amountReceived = total; }
+
             // Validation
-            if(amountReceived === 0){ 
+            if(paymentMethod === 'card' && !paymentTokenId){
+                showToast('warning', 'No Card Token', 'Save a card token on the Card Tokens page first.', 3000);
+                return;
+            }
+            if(amountReceived === 0 && paymentMethod !== 'card'){
                 showToast('warning', 'Missing Amount', 'Please enter the amount received.', 3000);
-                return; 
+                return;
             }
-            if(amountReceived < total){ 
+            if(amountReceived < total && paymentMethod !== 'card'){
                 showToast('error', 'Insufficient Payment', 'Amount received is less than the total due.', 3000);
-                return; 
+                return;
             }
-            
+
             var change = Math.round((amountReceived - total) * 100) / 100;
             var customerId = document.getElementById('customerSelect').value;
             var effectiveDiscount = currentDiscount;
@@ -749,7 +810,9 @@ case 'cart':
                     data.append('change', change);
                     data.append('discount', effectiveDiscount);
                     data.append('loyalty_points_used', currentLoyaltyPointsUsed);
-                    
+                    data.append('payment_method', paymentMethod);
+                    if (paymentTokenId) data.append('payment_token_id', paymentTokenId);
+
                     var btn = document.querySelector('.pos-btn-confirm');
                     var originalText = btn.innerHTML;
                     btn.innerHTML = 'Processing...';

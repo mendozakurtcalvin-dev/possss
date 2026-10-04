@@ -67,11 +67,14 @@ class ProductManager {
     
     public function getArchivedProducts($search = '') {
         $sql = "SELECT p.*, c.name as category_name FROM products p LEFT JOIN categories c ON p.category_id = c.id WHERE p.archived = 1";
+        $params = [];
         if (!empty($search)) {
-            $sql .= " AND p.name LIKE '%" . addslashes($search) . "%'";
+            $sql .= " AND p.name LIKE ?";
+            $params[] = '%' . $search . '%';
         }
         $sql .= " ORDER BY p.name";
-        $stmt = $this->pdo->query($sql);
+        $stmt = $this->pdo->prepare($sql);
+        $stmt->execute($params);
         return $stmt->fetchAll();
     }
     
@@ -171,11 +174,14 @@ class ProductManager {
                 LEFT JOIN users u1 ON ah.archived_by = u1.id
                 LEFT JOIN users u2 ON ah.restored_by = u2.id
             ";
+            $params = [];
             if (!empty($search)) {
-                $sql .= " WHERE ah.product_name LIKE '%" . addslashes($search) . "%'";
+                $sql .= " WHERE ah.product_name LIKE ?";
+                $params[] = '%' . $search . '%';
             }
             $sql .= " ORDER BY ah.archived_date DESC";
-            $stmt = $this->pdo->query($sql);
+            $stmt = $this->pdo->prepare($sql);
+            $stmt->execute($params);
             return $stmt->fetchAll();
         } catch(PDOException $e) {
             return [];
@@ -362,7 +368,7 @@ class SaleManager {
     private $pdo;
     public function __construct($pdo) { $this->pdo = $pdo; }
     
-    public function createSale($items, $total, $customer_id = null, $amount_paid = 0, $change = 0, $discount = 0, $loyalty_points_used = 0) {
+    public function createSale($items, $total, $customer_id = null, $amount_paid = 0, $change = 0, $discount = 0, $loyalty_points_used = 0, $payment_method = 'cash', $payment_token_id = null) {
         global $tax_rate;
         try {
             $this->pdo->beginTransaction();
@@ -379,8 +385,9 @@ class SaleManager {
             $amount_paid_rounded = round(floatval($amount_paid), 2);
             $change_rounded = round(floatval($change), 2);
             
-            $stmt = $this->pdo->prepare("INSERT INTO sales (invoice_number, user_id, customer_id, subtotal, tax, total_amount, payment_method, amount_paid, change_amount, discount_amount, loyalty_points_used) VALUES (?, ?, ?, ?, ?, ?, 'cash', ?, ?, ?, ?)");
-            $stmt->execute([$invoice, $_SESSION['user_id'], $customer_id, $subtotal_ex_vat, $vat, $total_rounded, $amount_paid_rounded, $change_rounded, $discount_amount, $loyalty_points_used]);
+            $payment_method = in_array($payment_method, ['cash', 'card', 'gcash', 'other'], true) ? $payment_method : 'cash';
+            $stmt = $this->pdo->prepare("INSERT INTO sales (invoice_number, user_id, customer_id, subtotal, tax, total_amount, payment_method, amount_paid, change_amount, discount_amount, loyalty_points_used, payment_token_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+            $stmt->execute([$invoice, $_SESSION['user_id'], $customer_id, $subtotal_ex_vat, $vat, $total_rounded, $payment_method, $amount_paid_rounded, $change_rounded, $discount_amount, $loyalty_points_used, $payment_token_id]);
             $saleId = $this->pdo->lastInsertId();
             
             // Add loyalty points if customer - FIXED: Points properly calculated
@@ -944,7 +951,21 @@ class HRManager {
     public function saveEmployee($data) {
         try {
             $this->createTablesIfNeeded();
-            
+
+            // Friendly duplicate check before hitting the unique constraints
+            $email = !empty($data['email']) ? $data['email'] : null;
+            $excludeId = (isset($data['id']) && $data['id']) ? intval($data['id']) : 0;
+            if (!empty($data['employee_id'])) {
+                $chk = $this->pdo->prepare("SELECT id FROM employees WHERE employee_id = ? AND id <> ?");
+                $chk->execute([$data['employee_id'], $excludeId]);
+                if ($chk->fetch()) { error_log("HRManager::saveEmployee: duplicate employee_id {$data['employee_id']}"); return false; }
+            }
+            if ($email) {
+                $chk = $this->pdo->prepare("SELECT id FROM employees WHERE email = ? AND id <> ?");
+                $chk->execute([$email, $excludeId]);
+                if ($chk->fetch()) { error_log("HRManager::saveEmployee: duplicate email $email"); return false; }
+            }
+
             if (isset($data['id']) && $data['id']) {
                 $stmt = $this->pdo->prepare("
                     UPDATE employees SET 
@@ -1689,9 +1710,8 @@ class FinanceManager {
             LEFT JOIN sales s ON c.id = s.customer_id
             GROUP BY c.id
             ORDER BY total_spent DESC
-            LIMIT ?
+            LIMIT " . (int)$limit . "
         ");
-        $stmt->bindValue(1, (int)$limit, PDO::PARAM_INT);
         $stmt->execute();
         $result = $stmt->fetchAll();
         
@@ -1708,9 +1728,8 @@ class FinanceManager {
                     0 as total_spent
                 FROM customers
                 ORDER BY name
-                LIMIT ?
+                LIMIT " . (int)$limit . "
             ");
-            $stmt->bindValue(1, (int)$limit, PDO::PARAM_INT);
             $stmt->execute();
             return $stmt->fetchAll();
         }

@@ -2,7 +2,7 @@
 // Application bootstrap: DB connection, settings, session, auth helpers
 
 error_reporting(E_ALL);
-ini_set('display_errors', 1);
+ini_set('display_errors', 0); // don't leak paths/SQL to users
 ini_set('log_errors', 1);
 ini_set('error_log', dirname(__DIR__) . '/error.log');
 
@@ -24,6 +24,12 @@ try {
     die("Connection failed: " . $e->getMessage());
 }
 
+session_set_cookie_params([
+    'lifetime' => 0,
+    'path' => '/',
+    'httponly' => true,
+    'samesite' => 'Lax'
+]);
 session_start();
 
 // ============================================
@@ -416,11 +422,13 @@ function hasPermission($permission) {
         'stock', 'stock_adjust', 'stock_history',
         'purchases', 'purchases_create', 'purchases_view',
         'suppliers', 'suppliers_create', 'suppliers_edit',
-        'inventory_reports'
+        'inventory_reports',
+        'procurement', 'procurement_manage',
+        'tokenization'
     ],
     'cashier' => [
         'dashboard', 'cart', 'sales', 'customers',
-        'returns_create'
+        'returns_create', 'tokenization'
     ],
     'inventory' => [
         'dashboard',
@@ -429,7 +437,8 @@ function hasPermission($permission) {
         'purchases', 'purchases_create', 'purchases_view',
         'suppliers', 'suppliers_create', 'suppliers_edit',
         'inventory_reports',
-        'returns_view'
+        'returns_view',
+        'procurement', 'procurement_manage'
     ],
     'hr' => [
         'dashboard', 'hr', 'users'

@@ -55,6 +55,12 @@ case 'stock':
 case 'suppliers':
     require __DIR__ . '/pages/suppliers.php';
     break;
+case 'procurement':
+    require __DIR__ . '/pages/procurement.php';
+    break;
+case 'tokenization':
+    require __DIR__ . '/pages/tokenization.php';
+    break;
 case 'purchases':
     require __DIR__ . '/pages/purchases.php';
     break;

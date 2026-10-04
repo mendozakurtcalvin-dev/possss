@@ -94,6 +94,20 @@ if (isset($_GET['logout'])) {
 // ============================================
 
 if (isset($_GET['action'])) {
+    // CSRF mitigation: for state-changing POST actions, the request must originate from our own pages
+    if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+        $origin = $_SERVER['HTTP_ORIGIN'] ?? '';
+        $referer = $_SERVER['HTTP_REFERER'] ?? '';
+        $host = $_SERVER['HTTP_HOST'] ?? '';
+        $ok = false;
+        foreach ([$origin, $referer] as $src) {
+            if ($src && $host && stripos($src, $host) !== false) { $ok = true; break; }
+        }
+        if (!$ok) {
+            echo json_encode(['success' => false, 'message' => 'Invalid request origin']);
+            exit();
+        }
+    }
     header('Content-Type: application/json; charset=utf-8');
     
     error_reporting(E_ALL);
@@ -362,8 +376,10 @@ if (isset($_GET['action'])) {
         $change = isset($_POST['change']) ? floatval($_POST['change']) : 0;
         $discount = isset($_POST['discount']) ? floatval($_POST['discount']) : 0;
         $loyalty_points_used = isset($_POST['loyalty_points_used']) ? intval($_POST['loyalty_points_used']) : 0;
-        
-        $result = $saleManager->createSale($items, $total, $customer_id, $amount_paid, $change, $discount, $loyalty_points_used);
+        $payment_method = $_POST['payment_method'] ?? 'cash';
+        $payment_token_id = !empty($_POST['payment_token_id']) ? intval($_POST['payment_token_id']) : null;
+
+        $result = $saleManager->createSale($items, $total, $customer_id, $amount_paid, $change, $discount, $loyalty_points_used, $payment_method, $payment_token_id);
         echo json_encode($result);
         exit();
     }
@@ -1340,6 +1356,189 @@ if (isset($_GET['action'])) {
             echo json_encode($stmt->fetchAll());
         } catch (Exception $e) {
             echo json_encode([]);
+        }
+        exit();
+    }
+
+    // ---- GET PROCUREMENT REQUESTS ----
+    if ($_GET['action'] == 'get_procurement') {
+        if (!canAccess('procurement') && !isAdmin()) {
+            echo json_encode(['success' => false, 'message' => 'Unauthorized']);
+            exit();
+        }
+        try {
+            $stmt = $pdo->query("
+                SELECT r.*, s.name AS supplier_name, u.full_name AS requested_by_name, a.full_name AS approved_by_name
+                FROM procurement_requests r
+                LEFT JOIN suppliers s ON r.supplier_id = s.id
+                LEFT JOIN users u ON r.requested_by = u.id
+                LEFT JOIN users a ON r.approved_by = a.id
+                ORDER BY r.created_at DESC LIMIT 200
+            ");
+            echo json_encode($stmt->fetchAll());
+        } catch (Exception $e) { echo json_encode([]); }
+        exit();
+    }
+
+    // ---- SAVE PROCUREMENT REQUEST ----
+    if ($_GET['action'] == 'save_procurement') {
+        if (!canAccess('procurement') && !isAdmin()) {
+            echo json_encode(['success' => false, 'message' => 'Unauthorized']);
+            exit();
+        }
+        try {
+            $item_name = trim($_POST['item_name'] ?? '');
+            $quantity = intval($_POST['quantity'] ?? 0);
+            if ($item_name === '' || $quantity <= 0) {
+                echo json_encode(['success' => false, 'message' => 'Item name and quantity are required']);
+                exit();
+            }
+            $req_number = 'PR-' . date('Ymd') . '-' . str_pad(rand(1, 9999), 4, '0', STR_PAD_LEFT);
+            $stmt = $pdo->prepare("
+                INSERT INTO procurement_requests
+                (req_number, item_name, product_id, quantity, estimated_unit_cost, supplier_id, department, notes, requested_by)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ");
+            $stmt->execute([
+                $req_number, $item_name,
+                !empty($_POST['product_id']) ? intval($_POST['product_id']) : null,
+                $quantity,
+                floatval($_POST['estimated_unit_cost'] ?? 0),
+                !empty($_POST['supplier_id']) ? intval($_POST['supplier_id']) : null,
+                $_POST['department'] ?? '',
+                $_POST['notes'] ?? '',
+                $_SESSION['user_id']
+            ]);
+            logActivity('procurement_request', "New request $req_number: $quantity x $item_name");
+            echo json_encode(['success' => true, 'req_number' => $req_number]);
+        } catch (Exception $e) {
+            echo json_encode(['success' => false, 'message' => $e->getMessage()]);
+        }
+        exit();
+    }
+
+    // ---- UPDATE PROCUREMENT STATUS (approve/reject/order/receive) ----
+    if ($_GET['action'] == 'update_procurement_status') {
+        if (!canAccess('procurement_manage') && !isAdmin()) {
+            echo json_encode(['success' => false, 'message' => 'Unauthorized']);
+            exit();
+        }
+        try {
+            $id = intval($_POST['id'] ?? 0);
+            $status = $_POST['status'] ?? '';
+            if (!in_array($status, ['pending', 'approved', 'rejected', 'ordered', 'received'], true)) {
+                echo json_encode(['success' => false, 'message' => 'Invalid status']);
+                exit();
+            }
+            $stmt = $pdo->prepare("UPDATE procurement_requests SET status = ?, approved_by = ? WHERE id = ?");
+            $stmt->execute([$status, $_SESSION['user_id'], $id]);
+
+            // When received and linked to a product, add stock back in
+            if ($status === 'received') {
+                $row = $pdo->prepare("SELECT * FROM procurement_requests WHERE id = ?");
+                $row->execute([$id]);
+                $req = $row->fetch();
+                if ($req && $req['product_id']) {
+                    $s = $pdo->prepare("SELECT stock_quantity FROM products WHERE id = ?");
+                    $s->execute([$req['product_id']]);
+                    $prod = $s->fetch();
+                    if ($prod) {
+                        $before = intval($prod['stock_quantity']);
+                        $after = $before + intval($req['quantity']);
+                        $pdo->prepare("UPDATE products SET stock_quantity = ? WHERE id = ?")->execute([$after, $req['product_id']]);
+                        $pdo->prepare("INSERT INTO stock_movements (product_id, movement_type, quantity, quantity_before, quantity_after, reason, reference_id, reference_type, user_id) VALUES (?, 'purchase', ?, ?, ?, ?, ?, 'purchase', ?)")
+                            ->execute([$req['product_id'], intval($req['quantity']), $before, $after, "Received via procurement {$req['req_number']}", $id, $_SESSION['user_id']]);
+
+                        // Also record it as a purchase so finance sees the expense
+                        $unitCost = floatval($req['estimated_unit_cost']);
+                        $subtotal = $unitCost * intval($req['quantity']);
+                        $taxRate = floatval(getSetting('tax_rate', 12)) / 100;
+                        $taxAmount = $subtotal * $taxRate;
+                        $totalAmount = $subtotal + $taxAmount;
+                        $poNumber = 'PO-' . date('Ymd') . '-' . str_pad(rand(1, 9999), 4, '0', STR_PAD_LEFT);
+                        $pdo->prepare("INSERT INTO purchases (po_number, supplier_id, purchase_date, subtotal, tax_amount, total_amount, payment_status, notes, recorded_by) VALUES (?, ?, ?, ?, ?, ?, 'unpaid', ?, ?)")
+                            ->execute([$poNumber, $req['supplier_id'] ?: null, date('Y-m-d'), $subtotal, $taxAmount, $totalAmount, "Received via procurement request {$req['req_number']}", $_SESSION['user_id']]);
+                        $purchaseId = $pdo->lastInsertId();
+                        $pdo->prepare("INSERT INTO purchase_items (purchase_id, product_id, quantity, unit_cost, total_cost) VALUES (?, ?, ?, ?, ?)")
+                            ->execute([$purchaseId, $req['product_id'], intval($req['quantity']), $unitCost, $subtotal]);
+                    }
+                }
+            }
+            logActivity('procurement_status', "Request #$id marked $status");
+            echo json_encode(['success' => true]);
+        } catch (Exception $e) {
+            echo json_encode(['success' => false, 'message' => $e->getMessage()]);
+        }
+        exit();
+    }
+
+    // ---- TOKENIZE CARD (never stores the full card number) ----
+    if ($_GET['action'] == 'tokenize_card') {
+        if (!canAccess('tokenization') && !isAdmin()) {
+            echo json_encode(['success' => false, 'message' => 'Unauthorized']);
+            exit();
+        }
+        try {
+            $number = preg_replace('/\D/', '', $_POST['card_number'] ?? '');
+            if (strlen($number) < 13 || strlen($number) > 19) {
+                echo json_encode(['success' => false, 'message' => 'Invalid card number']);
+                exit();
+            }
+            $brand = 'unknown';
+            if (preg_match('/^4/', $number)) $brand = 'visa';
+            elseif (preg_match('/^(5[1-5]|2[2-7])/', $number)) $brand = 'mastercard';
+            elseif (preg_match('/^3[47]/', $number)) $brand = 'amex';
+            $last4 = substr($number, -4);
+            $token = bin2hex(random_bytes(24)); // the safe stand-in for the card number
+
+            $stmt = $pdo->prepare("
+                INSERT INTO payment_tokens (customer_id, token, card_brand, last4, expiry_month, expiry_year, cardholder_name, created_by)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            ");
+            $stmt->execute([
+                !empty($_POST['customer_id']) ? intval($_POST['customer_id']) : null,
+                $token, $brand, $last4,
+                !empty($_POST['expiry_month']) ? intval($_POST['expiry_month']) : null,
+                !empty($_POST['expiry_year']) ? intval($_POST['expiry_year']) : null,
+                $_POST['cardholder_name'] ?? '',
+                $_SESSION['user_id']
+            ]);
+            logActivity('tokenize_card', "Tokenized $brand card ending $last4");
+            echo json_encode(['success' => true, 'token_id' => $pdo->lastInsertId(), 'last4' => $last4, 'brand' => $brand]);
+        } catch (Exception $e) {
+            echo json_encode(['success' => false, 'message' => $e->getMessage()]);
+        }
+        exit();
+    }
+
+    // ---- GET PAYMENT TOKENS ----
+    if ($_GET['action'] == 'get_payment_tokens') {
+        try {
+            $stmt = $pdo->query("
+                SELECT t.id, t.card_brand, t.last4, t.expiry_month, t.expiry_year, t.cardholder_name,
+                       t.created_at, t.active, c.name AS customer_name
+                FROM payment_tokens t
+                LEFT JOIN customers c ON t.customer_id = c.id
+                ORDER BY t.created_at DESC
+            ");
+            echo json_encode($stmt->fetchAll());
+        } catch (Exception $e) { echo json_encode([]); }
+        exit();
+    }
+
+    // ---- DELETE (DEACTIVATE) TOKEN ----
+    if ($_GET['action'] == 'delete_payment_token') {
+        if (!canAccess('tokenization') && !isAdmin()) {
+            echo json_encode(['success' => false, 'message' => 'Unauthorized']);
+            exit();
+        }
+        try {
+            $id = intval($_GET['id'] ?? 0);
+            $pdo->prepare("UPDATE payment_tokens SET active = 0 WHERE id = ?")->execute([$id]);
+            logActivity('delete_payment_token', "Deactivated payment token #$id");
+            echo json_encode(['success' => true]);
+        } catch (Exception $e) {
+            echo json_encode(['success' => false, 'message' => $e->getMessage()]);
         }
         exit();
     }

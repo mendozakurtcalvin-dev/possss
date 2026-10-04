@@ -573,8 +573,16 @@
     <a href="?page=purchases" class="<?php echo (isset($_GET['page']) && $_GET['page'] == 'purchases') ? 'active' : ''; ?>"><svg class="nav-icon"><use href="#nav-purchases"></use></svg>Purchases</a>
     <?php endif; ?>
 
+    <?php if (canAccess('procurement')): ?>
+    <a href="?page=procurement" class="<?php echo (isset($_GET['page']) && $_GET['page'] == 'procurement') ? 'active' : ''; ?>"><svg class="nav-icon"><use href="#nav-purchases"></use></svg>Procurement</a>
+    <?php endif; ?>
+
     <?php if (canAccess('suppliers')): ?>
     <a href="?page=suppliers" class="<?php echo (isset($_GET['page']) && $_GET['page'] == 'suppliers') ? 'active' : ''; ?>"><svg class="nav-icon"><use href="#nav-suppliers"></use></svg>Suppliers</a>
+    <?php endif; ?>
+
+    <?php if (canAccess('tokenization')): ?>
+    <a href="?page=tokenization" class="<?php echo (isset($_GET['page']) && $_GET['page'] == 'tokenization') ? 'active' : ''; ?>"><svg class="nav-icon"><use href="#nav-finance"></use></svg>Card Tokens</a>
     <?php endif; ?>
 
     <?php if (canAccess('inventory_reports')): ?>
