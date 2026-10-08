@@ -3,7 +3,7 @@ switch ('finance_reports'):
 case 'finance_reports':
 
                 if (!canAccess('finance_reports')) {
-                    echo '<div class="alert alert-danger" style="margin:2rem;text-align:center;"><div style="font-size:4rem;margin-bottom:1rem;">⛔</div><h2>Access Denied</h2><p>You do not have permission to access this page.</p><a href="?page=dashboard" class="btn btn-primary" style="margin-top:1rem;">Go to Dashboard</a></div>';
+                    echo '<div class="alert alert-danger" style="margin:2rem;text-align:center;"><div style="font-size:4rem;margin-bottom:1rem;"></div><h2>Access Denied</h2><p>You do not have permission to access this page.</p><a href="?page=dashboard" class="btn btn-primary" style="margin-top:1rem;">Go to Dashboard</a></div>';
                     break;  
                 }
                 
@@ -193,7 +193,7 @@ case 'finance_reports':
                     <div class="fin-page-header">
                         <div>
                             <h2 class="fin-page-title">
-                                <span class="fin-page-icon">📊</span>
+                                <span class="fin-page-icon"></span>
                                 Finance Reports
                             </h2>
                             <p class="fin-page-subtitle">
@@ -225,22 +225,22 @@ case 'finance_reports':
                     <!-- ============================================ -->
                     <div class="fin-tabs">
                         <a href="?page=finance_reports&type=revenue&period=<?php echo $period; ?>" class="fin-tab <?php echo $report_type == 'revenue' ? 'active' : ''; ?>">
-                            💰 Revenue
+                             Revenue
                         </a>
                         <a href="?page=finance_reports&type=expense&period=<?php echo $period; ?>" class="fin-tab <?php echo $report_type == 'expense' ? 'active' : ''; ?>">
-                            💸 Expenses
+                             Expenses
                         </a>
                         <a href="?page=finance_reports&type=sales&period=<?php echo $period; ?>" class="fin-tab <?php echo $report_type == 'sales' ? 'active' : ''; ?>">
-                            🛒 Sales
+                             Sales
                         </a>
                         <a href="?page=finance_reports&type=refund&period=<?php echo $period; ?>" class="fin-tab <?php echo $report_type == 'refund' ? 'active' : ''; ?>">
-                            🔄 Refunds
+                             Refunds
                         </a>
                         <a href="?page=finance_reports&type=profit&period=<?php echo $period; ?>" class="fin-tab <?php echo $report_type == 'profit' ? 'active' : ''; ?>">
-                            📈 Profit
+                             Profit
                         </a>
                         <a href="?page=finance_reports&type=payment&period=<?php echo $period; ?>" class="fin-tab <?php echo $report_type == 'payment' ? 'active' : ''; ?>">
-                            💳 Payments
+                             Payments
                         </a>
                     </div>
                     
@@ -313,7 +313,7 @@ case 'finance_reports':
                                     Apply
                                 </button>
                                 
-                                <!-- ⭐ NEW: Clear Filters button -->
+                                <!--  NEW: Clear Filters button -->
                                 <a href="?page=finance_reports&type=<?php echo $report_type; ?>&period=month" class="fin-clear-btn" title="Reset to this month">
                                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
                                         <line x1="18" y1="6" x2="6" y2="18"></line>
@@ -399,7 +399,7 @@ case 'finance_reports':
                         <div class="fin-card">
                             <div class="fin-card-header">
                                 <div class="fin-card-title-wrap">
-                                    <div class="fin-card-title">💰 Revenue Trend</div>
+                                    <div class="fin-card-title"> Revenue Trend</div>
                                     <div class="fin-card-subtitle">Daily breakdown for selected period</div>
                                 </div>
                             </div>
@@ -481,7 +481,7 @@ case 'finance_reports':
                         <div class="fin-card">
                             <div class="fin-card-header">
                                 <div class="fin-card-title-wrap">
-                                    <div class="fin-card-title">💸 Expenses by Category</div>
+                                    <div class="fin-card-title"> Expenses by Category</div>
                                     <div class="fin-card-subtitle">Total: ₱<?php echo number_format($expenses['total_expenses'], 2); ?></div>
                                 </div>
                             </div>
@@ -500,7 +500,7 @@ case 'finance_reports':
                             </div>
                             <?php else: ?>
                             <div class="fin-empty">
-                                <div class="fin-empty-icon">💸</div>
+                                <div class="fin-empty-icon"></div>
                                 <div class="fin-empty-title">No expenses recorded</div>
                                 <div class="fin-empty-text">Click "Add Expense" to start tracking</div>
                             </div>
@@ -553,7 +553,7 @@ case 'finance_reports':
                             <div class="fin-card" style="margin-bottom:0;">
                                 <div class="fin-card-header">
                                     <div class="fin-card-title-wrap">
-                                        <div class="fin-card-title">🏆 Top Products</div>
+                                        <div class="fin-card-title"> Top Products</div>
                                         <div class="fin-card-subtitle">All-time · by units sold</div>
                                     </div>
                                 </div>
@@ -576,14 +576,14 @@ case 'finance_reports':
                                     <?php endforeach; ?>
                                 </div>
                                 <?php else: ?>
-                                <div class="fin-empty"><div class="fin-empty-icon">📦</div><div class="fin-empty-title">No sales</div></div>
+                                <div class="fin-empty"><div class="fin-empty-icon"></div><div class="fin-empty-title">No sales</div></div>
                                 <?php endif; ?>
                             </div>
                             
                             <div class="fin-card" style="margin-bottom:0;">
                                 <div class="fin-card-header">
                                     <div class="fin-card-title-wrap">
-                                        <div class="fin-card-title">👥 Top Customers</div>
+                                        <div class="fin-card-title"> Top Customers</div>
                                         <div class="fin-card-subtitle">All-time · Top 5 by spending</div>
                                     </div>
                                 </div>
@@ -607,7 +607,7 @@ case 'finance_reports':
                                     <?php endforeach; ?>
                                 </div>
                                 <?php else: ?>
-                                <div class="fin-empty"><div class="fin-empty-icon">👥</div><div class="fin-empty-title">No customers</div></div>
+                                <div class="fin-empty"><div class="fin-empty-icon"></div><div class="fin-empty-title">No customers</div></div>
                                 <?php endif; ?>
                             </div>
                         </div>
@@ -616,7 +616,7 @@ case 'finance_reports':
                         <div class="fin-card">
                             <div class="fin-card-header">
                                 <div class="fin-card-title-wrap">
-                                    <div class="fin-card-title">📋 Transactions</div>
+                                    <div class="fin-card-title"> Transactions</div>
                                     <div class="fin-card-subtitle">Showing up to 100 most recent</div>
                                 </div>
                             </div>
@@ -656,7 +656,7 @@ case 'finance_reports':
                         <div class="fin-card">
                             <div class="fin-card-header">
                                 <div class="fin-card-title-wrap">
-                                    <div class="fin-card-title">🔄 Refund Records</div>
+                                    <div class="fin-card-title"> Refund Records</div>
                                     <div class="fin-card-subtitle"><?php echo count($refunds_detail); ?> returns in this period</div>
                                 </div>
                             </div>
@@ -709,7 +709,7 @@ case 'finance_reports':
                         <div class="fin-card">
                             <div class="fin-card-header">
                                 <div class="fin-card-title-wrap">
-                                    <div class="fin-card-title">📈 Profit & Loss Statement</div>
+                                    <div class="fin-card-title"> Profit & Loss Statement</div>
                                     <div class="fin-card-subtitle">For period <?php echo date('M d', strtotime($start_date)); ?> — <?php echo date('M d, Y', strtotime($end_date)); ?></div>
                                 </div>
                             </div>
@@ -771,7 +771,7 @@ case 'finance_reports':
                         <div class="fin-card">
                             <div class="fin-card-header">
                                 <div class="fin-card-title-wrap">
-                                    <div class="fin-card-title">💳 Payment Methods</div>
+                                    <div class="fin-card-title"> Payment Methods</div>
                                     <div class="fin-card-subtitle">Breakdown by payment type</div>
                                 </div>
                             </div>
@@ -782,12 +782,12 @@ case 'finance_reports':
                                 $total_payments = array_sum(array_column($payment_methods, 'total'));
                                 foreach ($payment_methods as $pm): 
                                     $pct = $total_payments > 0 ? ($pm['total'] / $total_payments) * 100 : 0;
-                                    $icons = ['cash' => '💵', 'card' => '💳', 'gcash' => '📱', 'maya' => '📲'];
-                                    $icon = $icons[strtolower($pm['method'])] ?? '💰';
+                                    $icons = [];
+                                    $icon = strtoupper(substr($pm['method'], 0, 1));
                                 ?>
                                 <div class="fin-report-row" style="flex-direction:column;align-items:stretch;gap:10px;">
                                     <div style="display:flex;align-items:center;gap:12px;">
-                                        <div style="font-size:24px;"><?php echo $icon; ?></div>
+                                        <div style="width:40px;height:40px;border-radius:10px;background:#EEF2FF;color:#4F46E5;display:flex;align-items:center;justify-content:center;font-weight:700;"><?php echo $icon; ?></div>
                                         <div class="fin-report-info">
                                             <div class="fin-report-name"><?php echo ucfirst($pm['method']); ?></div>
                                             <div class="fin-report-meta"><?php echo number_format($pm['count']); ?> transactions · <?php echo number_format($pct, 1); ?>%</div>
@@ -801,7 +801,7 @@ case 'finance_reports':
                                 <?php endforeach; ?>
                             </div>
                             <?php else: ?>
-                            <div class="fin-empty"><div class="fin-empty-icon">💳</div><div class="fin-empty-title">No payment data</div></div>
+                            <div class="fin-empty"><div class="fin-empty-icon"></div><div class="fin-empty-title">No payment data</div></div>
                             <?php endif; ?>
                         </div>
                     

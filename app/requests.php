@@ -89,6 +89,23 @@ if (isset($_GET['logout'])) {
     logout();
 }
 
+function generatePoNumber() {
+    global $pdo;
+    do {
+        $po_number = 'PO-' . date('Y') . '-' . str_pad((string) random_int(1, 9999), 4, '0', STR_PAD_LEFT);
+        $stmt = $pdo->prepare("SELECT id FROM procurement_purchase_orders WHERE po_number = ?");
+        $stmt->execute([$po_number]);
+    } while ($stmt->fetch());
+
+    return $po_number;
+}
+
+function recordInventoryTransaction($productId, $transactionType, $quantity, $previousStock, $newStock, $referenceType, $referenceId, $createdBy) {
+    global $pdo;
+    $stmt = $pdo->prepare("INSERT INTO inventory_transactions (product_id, transaction_type, quantity, previous_stock, new_stock, reference_type, reference_id, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?)");
+    return $stmt->execute([$productId, $transactionType, $quantity, $previousStock, $newStock, $referenceType, $referenceId, $createdBy]);
+}
+
 // ============================================
 // AJAX request handlers
 // ============================================
@@ -109,7 +126,13 @@ if (isset($_GET['action'])) {
         }
     }
     header('Content-Type: application/json; charset=utf-8');
-    
+
+    // Enforce CSRF token on procurement & job posting write actions
+    $csrfActions = ['save_procurement', 'update_procurement_status', 'set_budget_status', 'save_rfq', 'update_rfq_status', 'save_quotation', 'select_quotation', 'create_po', 'update_po_status', 'save_grn', 'save_invoice', 'approve_invoice', 'pay_invoice_paymongo', 'mark_invoice_paid', 'save_supplier_payment', 'confirm_payment', 'rate_supplier', 'save_job_posting', 'update_job_posting_status', 'save_employee', 'save_product_evaluation'];
+    if ($_SERVER['REQUEST_METHOD'] === 'POST' && in_array($_GET['action'] ?? '', $csrfActions, true)) {
+        verifyCsrf();
+    }
+
     error_reporting(E_ALL);
     ini_set('display_errors', 0);
     ini_set('log_errors', 1);
@@ -453,10 +476,6 @@ if (isset($_GET['action'])) {
             echo json_encode(['success' => false, 'message' => 'Unauthorized']);
             exit();
         }
-        if (!isAdmin() && $roleKey !== '') {
-            echo json_encode(['success' => false, 'message' => 'HR can create custom roles but cannot edit existing roles.']);
-            exit();
-        }
         $result = $userManager->saveCustomRole(
             $_POST['role_name'] ?? '',
             $roleKey,
@@ -598,6 +617,14 @@ if (isset($_GET['action'])) {
         if (isset($_POST['store_address'])) setSetting('store_address', $_POST['store_address']);
         if (isset($_POST['store_contact'])) setSetting('store_contact', $_POST['store_contact']);
         if (isset($_POST['vat_reg_number'])) setSetting('vat_reg_number', $_POST['vat_reg_number']);
+        if (isset($_POST['mail_enabled'])) setSetting('mail_enabled', !empty($_POST['mail_enabled']) ? '1' : '0');
+        if (isset($_POST['smtp_host'])) setSetting('smtp_host', trim($_POST['smtp_host']));
+        if (isset($_POST['smtp_port'])) setSetting('smtp_port', trim($_POST['smtp_port']));
+        if (isset($_POST['smtp_encryption'])) setSetting('smtp_encryption', trim($_POST['smtp_encryption']));
+        if (isset($_POST['smtp_username'])) setSetting('smtp_username', trim($_POST['smtp_username']));
+        if (isset($_POST['smtp_password'])) setSetting('smtp_password', trim($_POST['smtp_password']));
+        if (isset($_POST['mail_from_name'])) setSetting('mail_from_name', trim($_POST['mail_from_name']));
+        if (isset($_POST['mail_from_address'])) setSetting('mail_from_address', trim($_POST['mail_from_address']));
         
         if (isset($_FILES['store_logo']) && $_FILES['store_logo']['error'] === UPLOAD_ERR_OK) {
             $uploadDir = 'uploads/logo/';
@@ -660,7 +687,15 @@ if (isset($_GET['action'])) {
             'store_address' => getSetting('store_address', ''),
             'store_contact' => getSetting('store_contact', ''),
             'vat_reg_number' => getSetting('vat_reg_number', ''),
-            'store_logo' => getSetting('store_logo', '')
+            'store_logo' => getSetting('store_logo', ''),
+            'mail_enabled' => getSetting('mail_enabled', false),
+            'smtp_host' => getSetting('smtp_host', 'localhost'),
+            'smtp_port' => getSetting('smtp_port', 587),
+            'smtp_encryption' => getSetting('smtp_encryption', 'tls'),
+            'smtp_username' => getSetting('smtp_username', ''),
+            'smtp_password' => getSetting('smtp_password', ''),
+            'mail_from_name' => getSetting('mail_from_name', 'Smart Market POS'),
+            'mail_from_address' => getSetting('mail_from_address', 'noreply@localhost')
         ]);
         exit();
     }
@@ -713,12 +748,28 @@ if (isset($_GET['action'])) {
                 echo json_encode(['success' => false, 'message' => 'First and Last name are required']);
                 exit();
             }
+            if (!empty($data['email']) && !filter_var($data['email'], FILTER_VALIDATE_EMAIL)) {
+                echo json_encode(['success' => false, 'message' => 'Enter a valid employee email address']);
+                exit();
+            }
 
+            $isNewEmployee = empty($data['id']);
             $result = $hrManager->saveEmployee($data);
             
             if ($result) {
                 logActivity('save_employee', "Saved employee: {$data['first_name']} {$data['last_name']} ({$data['employee_id']})");
-                echo json_encode(['success' => true]);
+                $emailResult = null;
+                if ($isNewEmployee && !empty($data['email'])) {
+                    $emailResult = sendEmployeeWelcomeEmail($data);
+                    if (!$emailResult['success']) {
+                        error_log('Employee welcome email was not sent for '.$data['employee_id'].': '.$emailResult['message']);
+                    }
+                }
+                echo json_encode([
+                    'success' => true,
+                    'email_sent' => $emailResult === null ? null : $emailResult['success'],
+                    'email_message' => $emailResult['message'] ?? null
+                ]);
             } else {
                 echo json_encode(['success' => false, 'message' => 'Database error - check error.log']);
             }
@@ -1368,15 +1419,122 @@ if (isset($_GET['action'])) {
         }
         try {
             $stmt = $pdo->query("
-                SELECT r.*, s.name AS supplier_name, u.full_name AS requested_by_name, a.full_name AS approved_by_name
+                SELECT r.*, s.name AS supplier_name, p.stock_quantity AS current_stock,
+                    p.low_stock_threshold AS minimum_stock, u.full_name AS requested_by_name,
+                    a.full_name AS approved_by_name
                 FROM procurement_requests r
                 LEFT JOIN suppliers s ON r.supplier_id = s.id
+                LEFT JOIN products p ON r.product_id = p.id
                 LEFT JOIN users u ON r.requested_by = u.id
                 LEFT JOIN users a ON r.approved_by = a.id
                 ORDER BY r.created_at DESC LIMIT 200
             ");
             echo json_encode($stmt->fetchAll());
         } catch (Exception $e) { echo json_encode([]); }
+        exit();
+    }
+
+    // ---- PROCUREMENT SOURCING ANALYSIS ----
+    if ($_GET['action'] == 'get_procurement_analysis') {
+        if (!canAccess('procurement') && !isAdmin()) {
+            echo json_encode(['success' => false, 'message' => 'Unauthorized']);
+            exit();
+        }
+        try {
+            $stmt = $pdo->query("
+                SELECT e.*, p.name AS product_name, p.stock_quantity,
+                    p.low_stock_threshold AS minimum_stock, p.unit,
+                    s.name AS supplier_name, s.supplier_type,
+                    COALESCE(demand.units_sold_90d, 0) AS units_sold_90d,
+                    performance.avg_performance
+                FROM procurement_product_evaluations e
+                JOIN products p ON p.id = e.product_id
+                JOIN suppliers s ON s.id = e.supplier_id
+                LEFT JOIN (
+                    SELECT si.product_id, SUM(si.quantity) AS units_sold_90d
+                    FROM sale_items si
+                    JOIN sales sa ON sa.id = si.sale_id
+                    WHERE sa.sale_date >= DATE_SUB(CURDATE(), INTERVAL 90 DAY)
+                    GROUP BY si.product_id
+                ) demand ON demand.product_id = p.id
+                LEFT JOIN (
+                    SELECT supplier_id,
+                        AVG((COALESCE(otif_score, 0) + COALESCE(quality_score, 0) + COALESCE(responsiveness_score, 0)) / 3) AS avg_performance
+                    FROM procurement_supplier_ratings
+                    GROUP BY supplier_id
+                ) performance ON performance.supplier_id = s.id
+                ORDER BY e.product_id, e.unit_price ASC, e.updated_at DESC
+            ");
+            $evaluations = $stmt->fetchAll();
+            foreach ($evaluations as &$evaluation) {
+                $performance = $evaluation['avg_performance'] !== null ? (float)$evaluation['avg_performance'] : null;
+                $quality = (int)$evaluation['quality_score'];
+                $availability = (int)$evaluation['availability_score'];
+                $demandPerMonth = (float)$evaluation['units_sold_90d'] / 3;
+                if ($quality <= 2 || ($performance !== null && $performance <= 2)) {
+                    $evaluation['recommendation'] = 'not_recommended';
+                } elseif ($quality >= 4 && $availability >= 4 && $demandPerMonth >= 1 && $performance !== null && $performance >= 4) {
+                    $evaluation['recommendation'] = 'long_term';
+                } elseif ($quality >= 3 && $availability >= 3 && $demandPerMonth > 0) {
+                    $evaluation['recommendation'] = 'short_term';
+                } else {
+                    $evaluation['recommendation'] = 'needs_review';
+                }
+                $evaluation['recommendation_reason'] = $evaluation['recommendation'] === 'long_term'
+                    ? 'Strong demand, good quality and availability, and consistently high supplier performance.'
+                    : ($evaluation['recommendation'] === 'short_term'
+                        ? 'Suitable for short-term purchasing, but review demand or supplier performance before committing long term.'
+                        : ($evaluation['recommendation'] === 'not_recommended'
+                            ? 'Low quality or supplier performance score makes this a poor sourcing choice.'
+                            : 'More demand or supplier performance history is needed before making a long-term decision.'));
+            }
+            unset($evaluation);
+            echo json_encode($evaluations);
+        } catch (Exception $e) {
+            error_log('Procurement analysis failed: ' . $e->getMessage());
+            echo json_encode(['success' => false, 'message' => 'Could not load procurement analysis.']);
+        }
+        exit();
+    }
+
+    if ($_GET['action'] == 'save_product_evaluation') {
+        if (!canAccess('procurement_manage') && !isAdmin()) {
+            echo json_encode(['success' => false, 'message' => 'Unauthorized']);
+            exit();
+        }
+        try {
+            $productId = (int)($_POST['product_id'] ?? 0);
+            $supplierId = (int)($_POST['supplier_id'] ?? 0);
+            $quality = (int)($_POST['quality_score'] ?? 0);
+            $availability = (int)($_POST['availability_score'] ?? 0);
+            $unitPrice = filter_var($_POST['unit_price'] ?? null, FILTER_VALIDATE_FLOAT);
+            $leadTime = filter_var($_POST['lead_time_days'] ?? null, FILTER_VALIDATE_INT);
+            $minimumOrder = filter_var($_POST['minimum_order_quantity'] ?? null, FILTER_VALIDATE_INT);
+            if (!$productId || !$supplierId || $quality < 1 || $quality > 5 || $availability < 1 || $availability > 5 ||
+                $unitPrice === false || $unitPrice < 0 || $leadTime === false || $leadTime < 0 ||
+                $minimumOrder === false || $minimumOrder < 1) {
+                echo json_encode(['success' => false, 'message' => 'Enter a product, supplier, scores from 1–5, non-negative price/lead time, and a minimum order quantity of at least 1.']);
+                exit();
+            }
+            $stmt = $pdo->prepare("
+                INSERT INTO procurement_product_evaluations
+                    (product_id, supplier_id, quality_score, availability_score, unit_price, lead_time_days, minimum_order_quantity, evaluation_notes, evaluated_by)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON DUPLICATE KEY UPDATE quality_score = VALUES(quality_score),
+                    availability_score = VALUES(availability_score), unit_price = VALUES(unit_price),
+                    lead_time_days = VALUES(lead_time_days), minimum_order_quantity = VALUES(minimum_order_quantity),
+                    evaluation_notes = VALUES(evaluation_notes), evaluated_by = VALUES(evaluated_by), updated_at = CURRENT_TIMESTAMP
+            ");
+            $stmt->execute([
+                $productId, $supplierId, $quality, $availability, $unitPrice, $leadTime,
+                $minimumOrder, trim($_POST['evaluation_notes'] ?? ''), $_SESSION['user_id']
+            ]);
+            logActivity('procurement_product_evaluation', "Evaluated product #$productId from supplier #$supplierId");
+            echo json_encode(['success' => true]);
+        } catch (Exception $e) {
+            error_log('Product sourcing evaluation save failed: ' . $e->getMessage());
+            echo json_encode(['success' => false, 'message' => 'Could not save this evaluation.']);
+        }
         exit();
     }
 
@@ -1396,8 +1554,8 @@ if (isset($_GET['action'])) {
             $req_number = 'PR-' . date('Ymd') . '-' . str_pad(rand(1, 9999), 4, '0', STR_PAD_LEFT);
             $stmt = $pdo->prepare("
                 INSERT INTO procurement_requests
-                (req_number, item_name, product_id, quantity, estimated_unit_cost, supplier_id, department, notes, requested_by)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                (req_number, item_name, product_id, quantity, estimated_unit_cost, supplier_id, department, cost_centre, notes, requested_by)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ");
             $stmt->execute([
                 $req_number, $item_name,
@@ -1406,10 +1564,12 @@ if (isset($_GET['action'])) {
                 floatval($_POST['estimated_unit_cost'] ?? 0),
                 !empty($_POST['supplier_id']) ? intval($_POST['supplier_id']) : null,
                 $_POST['department'] ?? '',
+                $_POST['cost_centre'] ?? '',
                 $_POST['notes'] ?? '',
                 $_SESSION['user_id']
             ]);
             logActivity('procurement_request', "New request $req_number: $quantity x $item_name");
+            notifyInventory('procurement', 'Budget check needed', "New requisition $req_number ($quantity x $item_name) needs a finance budget check.", !empty($_POST['product_id']) ? intval($_POST['product_id']) : null);
             echo json_encode(['success' => true, 'req_number' => $req_number]);
         } catch (Exception $e) {
             echo json_encode(['success' => false, 'message' => $e->getMessage()]);
@@ -1430,45 +1590,842 @@ if (isset($_GET['action'])) {
                 echo json_encode(['success' => false, 'message' => 'Invalid status']);
                 exit();
             }
+            $pdo->beginTransaction();
+            $row = $pdo->prepare("SELECT * FROM procurement_requests WHERE id = ? FOR UPDATE");
+            $row->execute([$id]);
+            $req = $row->fetch();
+            if (!$req) {
+                throw new Exception('Purchase request not found.');
+            }
+            $requestTransitions = [
+                'pending' => ['approved', 'rejected'],
+                'approved' => ['ordered', 'rejected'],
+                'ordered' => ['received', 'rejected'],
+            ];
+            if (!in_array($status, $requestTransitions[$req['status']] ?? [], true)) {
+                throw new Exception($req['status'] === 'received' && $status === 'received'
+                    ? 'This request has already been received.'
+                    : 'This purchase request status transition is not allowed.');
+            }
+
+            if ($status === 'received' && !empty($req['product_id'])) {
+                $s = $pdo->prepare("SELECT stock_quantity FROM products WHERE id = ? FOR UPDATE");
+                $s->execute([$req['product_id']]);
+                $prod = $s->fetch();
+                if (!$prod) {
+                    throw new Exception('Linked product was not found.');
+                }
+                $before = (int)$prod['stock_quantity'];
+                $quantity = (int)$req['quantity'];
+                $after = $before + $quantity;
+                $pdo->prepare("UPDATE products SET stock_quantity = ? WHERE id = ?")->execute([$after, $req['product_id']]);
+                $pdo->prepare("INSERT INTO stock_movements (product_id, movement_type, quantity, quantity_before, quantity_after, reason, reference_id, reference_type, user_id) VALUES (?, 'purchase', ?, ?, ?, ?, ?, 'purchase', ?)")
+                    ->execute([$req['product_id'], $quantity, $before, $after, "Received via procurement {$req['req_number']}", $id, $_SESSION['user_id']]);
+                recordInventoryTransaction($req['product_id'], 'PURCHASE', $quantity, $before, $after, 'procurement_request', $id, $_SESSION['user_id']);
+
+                $unitCost = (float)$req['estimated_unit_cost'];
+                $subtotal = $unitCost * $quantity;
+                $taxAmount = $subtotal * (floatval(getSetting('tax_rate', 12)) / 100);
+                $totalAmount = $subtotal + $taxAmount;
+                $poNumber = 'PR-' . date('Ymd') . '-' . bin2hex(random_bytes(4));
+                $pdo->prepare("INSERT INTO purchases (po_number, supplier_id, purchase_date, subtotal, tax_amount, total_amount, payment_status, notes, recorded_by) VALUES (?, ?, ?, ?, ?, ?, 'unpaid', ?, ?)")
+                    ->execute([$poNumber, $req['supplier_id'] ?: null, date('Y-m-d'), $subtotal, $taxAmount, $totalAmount, "Received via procurement request {$req['req_number']}", $_SESSION['user_id']]);
+                $purchaseId = $pdo->lastInsertId();
+                $pdo->prepare("INSERT INTO purchase_items (purchase_id, product_id, quantity, unit_cost, total_cost) VALUES (?, ?, ?, ?, ?)")
+                    ->execute([$purchaseId, $req['product_id'], $quantity, $unitCost, $subtotal]);
+            }
             $stmt = $pdo->prepare("UPDATE procurement_requests SET status = ?, approved_by = ? WHERE id = ?");
             $stmt->execute([$status, $_SESSION['user_id'], $id]);
+            $pdo->commit();
 
-            // When received and linked to a product, add stock back in
-            if ($status === 'received') {
-                $row = $pdo->prepare("SELECT * FROM procurement_requests WHERE id = ?");
-                $row->execute([$id]);
-                $req = $row->fetch();
-                if ($req && $req['product_id']) {
-                    $s = $pdo->prepare("SELECT stock_quantity FROM products WHERE id = ?");
-                    $s->execute([$req['product_id']]);
-                    $prod = $s->fetch();
-                    if ($prod) {
-                        $before = intval($prod['stock_quantity']);
-                        $after = $before + intval($req['quantity']);
-                        $pdo->prepare("UPDATE products SET stock_quantity = ? WHERE id = ?")->execute([$after, $req['product_id']]);
-                        $pdo->prepare("INSERT INTO stock_movements (product_id, movement_type, quantity, quantity_before, quantity_after, reason, reference_id, reference_type, user_id) VALUES (?, 'purchase', ?, ?, ?, ?, ?, 'purchase', ?)")
-                            ->execute([$req['product_id'], intval($req['quantity']), $before, $after, "Received via procurement {$req['req_number']}", $id, $_SESSION['user_id']]);
-
-                        // Also record it as a purchase so finance sees the expense
-                        $unitCost = floatval($req['estimated_unit_cost']);
-                        $subtotal = $unitCost * intval($req['quantity']);
-                        $taxRate = floatval(getSetting('tax_rate', 12)) / 100;
-                        $taxAmount = $subtotal * $taxRate;
-                        $totalAmount = $subtotal + $taxAmount;
-                        $poNumber = 'PO-' . date('Ymd') . '-' . str_pad(rand(1, 9999), 4, '0', STR_PAD_LEFT);
-                        $pdo->prepare("INSERT INTO purchases (po_number, supplier_id, purchase_date, subtotal, tax_amount, total_amount, payment_status, notes, recorded_by) VALUES (?, ?, ?, ?, ?, ?, 'unpaid', ?, ?)")
-                            ->execute([$poNumber, $req['supplier_id'] ?: null, date('Y-m-d'), $subtotal, $taxAmount, $totalAmount, "Received via procurement request {$req['req_number']}", $_SESSION['user_id']]);
-                        $purchaseId = $pdo->lastInsertId();
-                        $pdo->prepare("INSERT INTO purchase_items (purchase_id, product_id, quantity, unit_cost, total_cost) VALUES (?, ?, ?, ?, ?)")
-                            ->execute([$purchaseId, $req['product_id'], intval($req['quantity']), $unitCost, $subtotal]);
-                    }
+            if (in_array($status, ['approved', 'received', 'rejected'], true)) {
+                $emailResult = sendProcurementStatusEmail($id, $status);
+                if (!$emailResult['success']) {
+                    error_log('Procurement email notification failed for #'.$id.': '.$emailResult['message']);
                 }
             }
             logActivity('procurement_status', "Request #$id marked $status");
             echo json_encode(['success' => true]);
         } catch (Exception $e) {
+            if ($pdo->inTransaction()) $pdo->rollBack();
             echo json_encode(['success' => false, 'message' => $e->getMessage()]);
         }
+        exit();
+    }
+
+    // ---- BUDGET CHECK (finance) ----
+    if ($_GET['action'] == 'set_budget_status') {
+        if (!canAccess('finance') && !hasRole('finance') && !isAdmin()) {
+            echo json_encode(['success' => false, 'message' => 'Unauthorized (finance role required)']);
+            exit();
+        }
+        try {
+            $id = intval($_POST['id'] ?? 0);
+            $status = $_POST['budget_status'] ?? '';
+            if (!in_array($status, ['approved', 'rejected'], true)) {
+                echo json_encode(['success' => false, 'message' => 'Invalid budget status']); exit();
+            }
+            $stmt = $pdo->prepare("UPDATE procurement_requests SET budget_status = ?, budget_checked_by = ? WHERE id = ?");
+            $stmt->execute([$status, $_SESSION['user_id'], $id]);
+            logActivity('budget_check', "Requisition #$id budget $status");
+            echo json_encode(['success' => true]);
+        } catch (Exception $e) { echo json_encode(['success' => false, 'message' => $e->getMessage()]); }
+        exit();
+    }
+
+    // ---- RFQ LIST ----
+    if ($_GET['action'] == 'get_rfqs') {
+        try {
+            $stmt = $pdo->query("SELECT r.*, u.full_name AS created_by_name FROM procurement_rfqs r LEFT JOIN users u ON r.created_by = u.id ORDER BY r.created_at DESC LIMIT 200");
+            echo json_encode($stmt->fetchAll());
+        } catch (Exception $e) { echo json_encode([]); }
+        exit();
+    }
+
+    // ---- CREATE RFQ ----
+    if ($_GET['action'] == 'save_rfq') {
+        if (!canAccess('procurement_manage') && !isAdmin()) {
+            echo json_encode(['success' => false, 'message' => 'Unauthorized']);
+            exit();
+        }
+        try {
+            $title = trim($_POST['title'] ?? '');
+            if ($title === '') { echo json_encode(['success' => false, 'message' => 'Title required']); exit(); }
+            $rfq_number = 'RFQ-' . date('Ymd') . '-' . str_pad(rand(1, 9999), 4, '0', STR_PAD_LEFT);
+            $stmt = $pdo->prepare("INSERT INTO procurement_rfqs (rfq_number, request_id, title, item_name, quantity, estimated_value, deadline, status, notes, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, 'sent', ?, ?)");
+            $stmt->execute([
+                $rfq_number,
+                !empty($_POST['request_id']) ? intval($_POST['request_id']) : null,
+                $title,
+                $_POST['item_name'] ?? '',
+                max(1, intval($_POST['quantity'] ?? 1)),
+                floatval($_POST['estimated_value'] ?? 0),
+                !empty($_POST['deadline']) ? $_POST['deadline'] : null,
+                $_POST['notes'] ?? '',
+                $_SESSION['user_id']
+            ]);
+            logActivity('rfq_created', "RFQ $rfq_number: $title");
+            echo json_encode(['success' => true, 'rfq_number' => $rfq_number]);
+        } catch (Exception $e) { echo json_encode(['success' => false, 'message' => $e->getMessage()]); }
+        exit();
+    }
+
+    // ---- RFQ STATUS ----
+    if ($_GET['action'] == 'update_rfq_status') {
+        if (!canAccess('procurement_manage') && !isAdmin()) {
+            echo json_encode(['success' => false, 'message' => 'Unauthorized']);
+            exit();
+        }
+        try {
+            $id = intval($_POST['id'] ?? 0);
+            $status = $_POST['status'] ?? '';
+            if (!in_array($status, ['draft','sent','evaluating','awarded','cancelled'], true)) {
+                echo json_encode(['success' => false, 'message' => 'Invalid status']); exit();
+            }
+            $pdo->prepare("UPDATE procurement_rfqs SET status = ? WHERE id = ?")->execute([$status, $id]);
+            echo json_encode(['success' => true]);
+        } catch (Exception $e) { echo json_encode(['success' => false, 'message' => $e->getMessage()]); }
+        exit();
+    }
+
+    // ---- QUOTATIONS ----
+    if ($_GET['action'] == 'get_quotations') {
+        try {
+            $rfq_id = intval($_GET['rfq_id'] ?? 0);
+            $stmt = $pdo->prepare("
+                SELECT q.*, s.name AS supplier_name, s.supplier_type,
+                    (SELECT AVG((COALESCE(r.otif_score, 0) + COALESCE(r.quality_score, 0) + COALESCE(r.responsiveness_score, 0)) / 3)
+                     FROM procurement_supplier_ratings r WHERE r.supplier_id = s.id) AS supplier_performance
+                FROM procurement_quotations q
+                LEFT JOIN suppliers s ON q.supplier_id = s.id
+                WHERE q.rfq_id = ? ORDER BY q.total_price ASC
+            ");
+            $stmt->execute([$rfq_id]);
+            echo json_encode($stmt->fetchAll());
+        } catch (Exception $e) { echo json_encode([]); }
+        exit();
+    }
+
+    if ($_GET['action'] == 'get_procurement_history') {
+        if (!canAccess('procurement') && !isAdmin()) {
+            echo json_encode(['success' => false, 'message' => 'Unauthorized']);
+            exit();
+        }
+        try {
+            $stmt = $pdo->query("
+                SELECT i.item_name AS product_name, s.name AS supplier_name,
+                    COUNT(DISTINCT po.id) AS order_count,
+                    SUM(i.quantity) AS units_ordered,
+                    MAX(po.order_date) AS last_purchase,
+                    AVG(i.unit_cost) AS average_unit_cost
+                FROM procurement_po_items i
+                JOIN procurement_purchase_orders po ON po.id = i.po_id
+                LEFT JOIN suppliers s ON s.id = po.supplier_id
+                WHERE po.status IN ('approved','ordered','sent','acknowledged','partially_received','delivered','received','closed')
+                GROUP BY i.item_name, po.supplier_id, s.name
+                ORDER BY order_count DESC, units_ordered DESC
+            ");
+            echo json_encode($stmt->fetchAll());
+        } catch (Exception $e) {
+            error_log('Procurement history failed: ' . $e->getMessage());
+            echo json_encode(['success' => false, 'message' => 'Could not load procurement history.']);
+        }
+        exit();
+    }
+
+    if ($_GET['action'] == 'save_quotation') {
+        if (!canAccess('procurement_manage') && !isAdmin()) {
+            echo json_encode(['success' => false, 'message' => 'Unauthorized']);
+            exit();
+        }
+        try {
+            $rfq_id = intval($_POST['rfq_id'] ?? 0);
+            $supplier_id = intval($_POST['supplier_id'] ?? 0);
+            if (!$rfq_id || !$supplier_id) { echo json_encode(['success' => false, 'message' => 'RFQ and supplier required']); exit(); }
+            $qty = max(1, intval($_POST['quantity'] ?? 1));
+            $unit = floatval($_POST['unit_price'] ?? 0);
+            $stmt = $pdo->prepare("INSERT INTO procurement_quotations (rfq_id, supplier_id, unit_price, total_price, lead_time_days, payment_terms, notes, negotiation_notes) VALUES (?, ?, ?, ?, ?, ?, ?, ?)");
+            $stmt->execute([$rfq_id, $supplier_id, $unit, $unit * $qty, intval($_POST['lead_time_days'] ?? 0), $_POST['payment_terms'] ?? '', $_POST['notes'] ?? '', $_POST['negotiation_notes'] ?? '']);
+            echo json_encode(['success' => true]);
+        } catch (Exception $e) { echo json_encode(['success' => false, 'message' => $e->getMessage()]); }
+        exit();
+    }
+
+    if ($_GET['action'] == 'select_quotation') {
+        if (!canAccess('procurement_manage') && !isAdmin()) {
+            echo json_encode(['success' => false, 'message' => 'Unauthorized']);
+            exit();
+        }
+        try {
+            $id = intval($_POST['id'] ?? 0);
+            $q = $pdo->prepare("SELECT * FROM procurement_quotations WHERE id = ?"); $q->execute([$id]);
+            $row = $q->fetch();
+            if (!$row) { echo json_encode(['success' => false, 'message' => 'Quotation not found']); exit(); }
+            $pdo->prepare("UPDATE procurement_quotations SET is_selected = 0 WHERE rfq_id = ?")->execute([$row['rfq_id']]);
+            $pdo->prepare("UPDATE procurement_quotations SET is_selected = 1 WHERE id = ?")->execute([$id]);
+            $pdo->prepare("UPDATE procurement_rfqs SET status = 'awarded' WHERE id = ?")->execute([$row['rfq_id']]);
+            echo json_encode(['success' => true]);
+        } catch (Exception $e) { echo json_encode(['success' => false, 'message' => $e->getMessage()]); }
+        exit();
+    }
+
+    // ---- PURCHASE ORDERS ----
+    if ($_GET['action'] == 'get_pos') {
+        try {
+            $stmt = $pdo->query("SELECT p.*, s.name AS supplier_name, u.full_name AS created_by_name FROM procurement_purchase_orders p LEFT JOIN suppliers s ON p.supplier_id = s.id LEFT JOIN users u ON p.created_by = u.id ORDER BY p.created_at DESC");
+            echo json_encode($stmt->fetchAll());
+        } catch (Exception $e) { echo json_encode([]); }
+        exit();
+    }
+
+    if ($_GET['action'] == 'create_po') {
+        if (!canAccess('procurement_manage') && !isAdmin()) {
+            echo json_encode(['success' => false, 'message' => 'Unauthorized']);
+            exit();
+        }
+        try {
+            $supplier_id = intval($_POST['supplier_id'] ?? 0);
+            $items = json_decode($_POST['items'] ?? '', true);
+            if (!is_array($items) || !count($items)) {
+                $item_name = trim($_POST['item_name'] ?? '');
+                if ($item_name !== '') {
+                    $items = [[
+                        'item_name' => $item_name,
+                        'quantity' => max(1, intval($_POST['quantity'] ?? 1)),
+                        'unit_cost' => floatval($_POST['unit_cost'] ?? 0),
+                        'product_id' => !empty($_POST['product_id']) ? intval($_POST['product_id']) : null
+                    ]];
+                }
+            }
+            if (!$supplier_id || empty($items)) {
+                echo json_encode(['success' => false, 'message' => 'Supplier and at least one item required']);
+                exit();
+            }
+
+            $supplierCheck = $pdo->prepare("SELECT id FROM suppliers WHERE id = ? AND status = 'active'");
+            $supplierCheck->execute([$supplier_id]);
+            if (!$supplierCheck->fetchColumn()) {
+                echo json_encode(['success' => false, 'message' => 'Select an active supplier']);
+                exit();
+            }
+            $subtotal = 0;
+            foreach ($items as &$it) {
+                $itemName = trim((string)($it['item_name'] ?? ''));
+                $quantity = filter_var($it['quantity'] ?? null, FILTER_VALIDATE_INT);
+                $cost = filter_var($it['unit_cost'] ?? null, FILTER_VALIDATE_FLOAT);
+                if ($itemName === '' || $quantity === false || $quantity < 1 || $cost === false || $cost < 0) {
+                    echo json_encode(['success' => false, 'message' => 'Every PO item needs a name, positive quantity, and non-negative unit price.']);
+                    exit();
+                }
+                if (!empty($it['product_id'])) {
+                    $productCheck = $pdo->prepare("SELECT name FROM products WHERE id = ? AND archived = 0");
+                    $productCheck->execute([(int)$it['product_id']]);
+                    $productName = $productCheck->fetchColumn();
+                    if ($productName === false) {
+                        echo json_encode(['success' => false, 'message' => 'A selected PO product is no longer available.']);
+                        exit();
+                    }
+                    $it['item_name'] = $productName;
+                }
+                $subtotal += $cost * $quantity;
+            }
+            unset($it);
+            $taxRate = floatval(getSetting('tax_rate', 12)) / 100;
+            $taxAmount = $subtotal * $taxRate;
+            $totalAmount = $subtotal + $taxAmount;
+            $po_number = generatePoNumber();
+
+            $status = 'draft';
+            $pdo->beginTransaction();
+            $stmt = $pdo->prepare("INSERT INTO procurement_purchase_orders (po_number, request_id, rfq_id, supplier_id, order_date, expected_delivery, subtotal, tax_amount, total_amount, payment_terms, status, notes, created_by) VALUES (?, ?, ?, ?, CURDATE(), ?, ?, ?, ?, ?, ?, ?, ?)");
+            $stmt->execute([
+                $po_number,
+                !empty($_POST['request_id']) ? intval($_POST['request_id']) : null,
+                !empty($_POST['rfq_id']) ? intval($_POST['rfq_id']) : null,
+                $supplier_id,
+                !empty($_POST['expected_delivery']) ? $_POST['expected_delivery'] : null,
+                $subtotal, $taxAmount, $totalAmount,
+                $_POST['payment_terms'] ?? 'Net 30',
+                $status,
+                $_POST['notes'] ?? '',
+                $_SESSION['user_id']
+            ]);
+            $poId = $pdo->lastInsertId();
+
+            foreach ($items as $it) {
+                $qty = max(1, intval($it['quantity'] ?? 1));
+                $cost = floatval($it['unit_cost'] ?? 0);
+                $pdo->prepare("INSERT INTO procurement_po_items (po_id, product_id, item_name, quantity, quantity_received, quantity_remaining, unit_cost, total_cost) VALUES (?, ?, ?, ?, 0, ?, ?, ?)")
+                    ->execute([$poId, !empty($it['product_id']) ? intval($it['product_id']) : null, $it['item_name'] ?? 'Item', $qty, $qty, $cost, $cost * $qty]);
+            }
+
+            logActivity('po_created', "PO $po_number created with " . count($items) . " line item(s), total $totalAmount");
+            $pdo->commit();
+            echo json_encode(['success' => true, 'po_number' => $po_number, 'id' => $poId]);
+        } catch (Exception $e) {
+            if ($pdo->inTransaction()) $pdo->rollBack();
+            error_log('Purchase order creation failed: ' . $e->getMessage());
+            echo json_encode(['success' => false, 'message' => $e->getMessage()]);
+        }
+        exit();
+    }
+
+    if ($_GET['action'] == 'update_po_status') {
+        if (!canAccess('procurement_manage') && !hasRole('finance') && !isAdmin()) {
+            echo json_encode(['success' => false, 'message' => 'Unauthorized']);
+            exit();
+        }
+        try {
+            $id = intval($_POST['id'] ?? 0);
+            $status = $_POST['status'] ?? '';
+            $allowed = ['pending','approved','ordered','sent','acknowledged','partially_received','delivered','received','closed','cancelled','finance_pending','draft'];
+            if (!in_array($status, $allowed, true)) { echo json_encode(['success' => false, 'message' => 'Invalid status']); exit(); }
+            $currentStmt = $pdo->prepare("SELECT status FROM procurement_purchase_orders WHERE id = ?");
+            $currentStmt->execute([$id]);
+            $currentStatus = $currentStmt->fetchColumn();
+            if ($currentStatus === false) { echo json_encode(['success' => false, 'message' => 'Purchase order not found']); exit(); }
+            $transitions = [
+                'draft' => ['pending', 'cancelled'],
+                'pending' => ['approved', 'finance_pending', 'cancelled'],
+                'finance_pending' => ['approved', 'cancelled'],
+                'approved' => ['ordered', 'sent', 'acknowledged', 'cancelled'],
+                'ordered' => ['sent', 'acknowledged', 'cancelled'],
+                'sent' => ['acknowledged', 'partially_received', 'delivered', 'received'],
+                'acknowledged' => ['ordered', 'partially_received', 'delivered', 'received'],
+                'partially_received' => ['partially_received', 'received'],
+                'delivered' => ['closed', 'received'],
+            ];
+            if (!in_array($status, $transitions[$currentStatus] ?? [], true)) {
+                echo json_encode(['success' => false, 'message' => 'This purchase order status transition is not allowed.']);
+                exit();
+            }
+            if ($status === 'approved') {
+                if (!canAccess('finance') && !hasRole('finance') && !isAdmin()) { echo json_encode(['success' => false, 'message' => 'Finance approval required']); exit(); }
+                $pdo->prepare("UPDATE procurement_purchase_orders SET status = 'approved', finance_approved_by = ? WHERE id = ?")->execute([$_SESSION['user_id'], $id]);
+            } elseif ($status === 'acknowledged') {
+                $pdo->prepare("UPDATE procurement_purchase_orders SET status = 'acknowledged', supplier_ack = 1 WHERE id = ?")->execute([$id]);
+            } else {
+                $pdo->prepare("UPDATE procurement_purchase_orders SET status = ? WHERE id = ?")->execute([$status, $id]);
+            }
+            logActivity('po_status', "PO #$id -> $status");
+            echo json_encode(['success' => true]);
+        } catch (Exception $e) { echo json_encode(['success' => false, 'message' => $e->getMessage()]); }
+        exit();
+    }
+
+    // ---- GOODS RECEIPT ----
+    if ($_GET['action'] == 'get_grns') {
+        try {
+            $stmt = $pdo->query("SELECT g.*, p.po_number, s.name AS supplier_name FROM procurement_grns g LEFT JOIN procurement_purchase_orders p ON g.po_id = p.id LEFT JOIN suppliers s ON p.supplier_id = s.id ORDER BY g.created_at DESC");
+            echo json_encode($stmt->fetchAll());
+        } catch (Exception $e) { echo json_encode([]); }
+        exit();
+    }
+
+    if ($_GET['action'] == 'get_po_receivable_items') {
+        if (!canAccess('procurement_manage') && !isAdmin()) {
+            echo json_encode(['success' => false, 'message' => 'Unauthorized']);
+            exit();
+        }
+        try {
+            $poId = (int)($_GET['po_id'] ?? 0);
+            $stmt = $pdo->prepare("
+                SELECT id, item_name, quantity, quantity_received,
+                    GREATEST(quantity - quantity_received, 0) AS quantity_remaining
+                FROM procurement_po_items
+                WHERE po_id = ?
+                ORDER BY id
+            ");
+            $stmt->execute([$poId]);
+            echo json_encode($stmt->fetchAll());
+        } catch (Exception $e) {
+            error_log('Could not load receivable PO items: ' . $e->getMessage());
+            echo json_encode(['success' => false, 'message' => 'Could not load purchase order items.']);
+        }
+        exit();
+    }
+
+    if ($_GET['action'] == 'save_grn') {
+        if (!canAccess('procurement_manage') && !isAdmin()) {
+            echo json_encode(['success' => false, 'message' => 'Unauthorized']);
+            exit();
+        }
+        try {
+            $po_id = intval($_POST['po_id'] ?? 0);
+            if (!$po_id) {
+                echo json_encode(['success' => false, 'message' => 'PO required']);
+                exit();
+            }
+
+            $receivedDate = $_POST['received_date'] ?? date('Y-m-d');
+            $dateCheck = DateTime::createFromFormat('Y-m-d', $receivedDate);
+            if (!$dateCheck || $dateCheck->format('Y-m-d') !== $receivedDate) {
+                echo json_encode(['success' => false, 'message' => 'Enter a valid receiving date.']);
+                exit();
+            }
+
+            $pdo->beginTransaction();
+            $po = $pdo->prepare("SELECT * FROM procurement_purchase_orders WHERE id = ? FOR UPDATE");
+            $po->execute([$po_id]);
+            $poRow = $po->fetch();
+            if (!$poRow) {
+                throw new Exception('Purchase order not found.');
+            }
+            if (!in_array($poRow['status'], ['ordered', 'sent', 'acknowledged', 'partially_received', 'delivered'], true)) {
+                throw new Exception('Only an ordered purchase order can receive goods.');
+            }
+
+            $receivedItems = json_decode($_POST['received_items'] ?? '[]', true);
+            if (!is_array($receivedItems) || empty($receivedItems)) {
+                $receivedItems = [[
+                    'po_item_id' => intval($_POST['po_item_id'] ?? 0),
+                    'quantity' => max(0, intval($_POST['quantity'] ?? 0))
+                ]];
+            }
+            $grn_number = 'GRN-' . date('Ymd') . '-' . str_pad((string) random_int(1, 9999), 4, '0', STR_PAD_LEFT);
+            $totalReceived = 0;
+
+            foreach ($receivedItems as $entry) {
+                $poItemId = intval($entry['po_item_id'] ?? 0);
+                $receivedQty = max(0, intval($entry['quantity'] ?? 0));
+                if ($poItemId <= 0) {
+                    throw new Exception('Invalid purchase order item.');
+                }
+                if ($receivedQty === 0) {
+                    continue;
+                }
+
+                $itemStmt = $pdo->prepare("SELECT * FROM procurement_po_items WHERE id = ? AND po_id = ? FOR UPDATE");
+                $itemStmt->execute([$poItemId, $po_id]);
+                $item = $itemStmt->fetch();
+                if (!$item) {
+                    throw new Exception('A received item does not belong to this purchase order.');
+                }
+
+                $remaining = max(0, intval($item['quantity']) - intval($item['quantity_received']));
+                if ($receivedQty > $remaining) {
+                    throw new Exception('Received quantity for ' . $item['item_name'] . ' cannot exceed its remaining quantity of ' . $remaining . '.');
+                }
+                $acceptedQty = $receivedQty;
+                if ($acceptedQty <= 0) {
+                    continue;
+                }
+
+                $productId = !empty($item['product_id']) ? intval($item['product_id']) : null;
+                $beforeStock = 0;
+                $newStock = 0;
+
+                if ($productId) {
+                    $stockStmt = $pdo->prepare("SELECT stock_quantity FROM products WHERE id = ? FOR UPDATE");
+                    $stockStmt->execute([$productId]);
+                    $product = $stockStmt->fetch();
+                    if (!$product) {
+                        throw new Exception('Product not found for PO item.');
+                    }
+                    $beforeStock = intval($product['stock_quantity']);
+                    $newStock = $beforeStock + $acceptedQty;
+                    $pdo->prepare("UPDATE products SET stock_quantity = ? WHERE id = ?")->execute([$newStock, $productId]);
+                    $pdo->prepare("INSERT INTO stock_movements (product_id, movement_type, quantity, quantity_before, quantity_after, reason, reference_id, reference_type, user_id) VALUES (?, 'purchase', ?, ?, ?, ?, ?, 'purchase_order', ?)")
+                        ->execute([$productId, $acceptedQty, $beforeStock, $newStock, "Received via GRN $grn_number", $po_id, $_SESSION['user_id']]);
+                    recordInventoryTransaction($productId, 'PURCHASE', $acceptedQty, $beforeStock, $newStock, 'purchase_order', $po_id, $_SESSION['user_id']);
+                }
+
+                $newReceived = intval($item['quantity_received']) + $acceptedQty;
+                $newRemaining = max(0, intval($item['quantity']) - $newReceived);
+                $pdo->prepare("UPDATE procurement_po_items SET quantity_received = ?, quantity_remaining = ?, received_at = COALESCE(received_at, NOW()), inventory_updated_at = NOW() WHERE id = ?")
+                    ->execute([$newReceived, $newRemaining, $poItemId]);
+
+                $totalReceived += $acceptedQty;
+            }
+
+            if ($totalReceived <= 0) {
+                throw new Exception('No valid receiving quantity was submitted for this PO.');
+            }
+
+            $status = 'partial';
+            $allReceived = $pdo->prepare("SELECT COUNT(*) as count FROM procurement_po_items WHERE po_id = ? AND quantity_received < quantity");
+            $allReceived->execute([$po_id]);
+            if ((int) $allReceived->fetch()['count'] === 0) {
+                $status = 'received';
+            }
+
+            $outstandingStmt = $pdo->prepare("
+                SELECT item_name, GREATEST(quantity - quantity_received, 0) AS outstanding
+                FROM procurement_po_items
+                WHERE po_id = ? AND quantity_received < quantity
+            ");
+            $outstandingStmt->execute([$po_id]);
+            $outstandingItems = [];
+            foreach ($outstandingStmt->fetchAll() as $outstandingItem) {
+                $outstandingItems[] = $outstandingItem['item_name'] . ': ' . $outstandingItem['outstanding'] . ' outstanding';
+            }
+            $discrepancies = trim($_POST['discrepancies'] ?? '');
+            if ($outstandingItems) {
+                $outstandingNote = 'Outstanding quantities: ' . implode('; ', $outstandingItems);
+                $discrepancies = $discrepancies === '' ? $outstandingNote : $discrepancies . "\n" . $outstandingNote;
+            }
+            $pdo->prepare("INSERT INTO procurement_grns (grn_number, po_id, received_date, received_by, discrepancies, status) VALUES (?, ?, ?, ?, ?, ?)")->execute([$grn_number, $po_id, $receivedDate, $_SESSION['user_id'], $discrepancies, $status]);
+            $pdo->prepare("UPDATE procurement_purchase_orders SET status = ?, updated_at = NOW() WHERE id = ?")->execute([$status === 'received' ? 'received' : 'partially_received', $po_id]);
+
+            logActivity('grn_created', "GRN $grn_number for PO #$po_id");
+            $pdo->commit();
+            echo json_encode(['success' => true, 'grn_number' => $grn_number, 'status' => $status === 'received' ? 'received' : 'partially_received']);
+        } catch (Exception $e) {
+            if ($pdo->inTransaction()) { $pdo->rollBack(); }
+            echo json_encode(['success' => false, 'message' => $e->getMessage()]);
+        }
+        exit();
+    }
+
+    // ---- INVOICES & 3-WAY MATCH ----
+    if ($_GET['action'] == 'get_invoices') {
+        try {
+            $stmt = $pdo->query("SELECT i.*, p.po_number, s.name AS supplier_name FROM procurement_invoices i LEFT JOIN procurement_purchase_orders p ON i.po_id = p.id LEFT JOIN suppliers s ON i.supplier_id = s.id ORDER BY i.created_at DESC LIMIT 200");
+            echo json_encode($stmt->fetchAll());
+        } catch (Exception $e) { echo json_encode([]); }
+        exit();
+    }
+
+    if ($_GET['action'] == 'save_invoice') {
+        try {
+            $po_id = intval($_POST['po_id'] ?? 0);
+            $invoice_number = trim($_POST['invoice_number'] ?? '');
+            $amount = floatval($_POST['amount'] ?? 0);
+            if (!$po_id || $invoice_number === '' || $amount <= 0) { echo json_encode(['success' => false, 'message' => 'PO, invoice number and amount required']); exit(); }
+            $po = $pdo->prepare("SELECT * FROM procurement_purchase_orders WHERE id = ?"); $po->execute([$po_id]);
+            $poRow = $po->fetch();
+            $grn = $pdo->prepare("SELECT * FROM procurement_grns WHERE po_id = ? ORDER BY created_at DESC LIMIT 1"); $grn->execute([$po_id]);
+            $grnRow = $grn->fetch();
+            // 3-way match: invoice amount vs PO total, GRN exists
+            $match = 'pending';
+            if ($grnRow && $poRow) {
+                $poTotal = floatval($poRow['total_amount']);
+                $match = (abs($poTotal - $amount) < 0.51) ? 'matched' : 'mismatch';
+            } elseif (!$grnRow) {
+                $match = 'mismatch';
+            }
+            $stmt = $pdo->prepare("INSERT INTO procurement_invoices (invoice_number, po_id, grn_id, supplier_id, invoice_date, amount, match_status, notes) VALUES (?, ?, ?, ?, ?, ?, ?, ?)");
+            $stmt->execute([$invoice_number, $po_id, $grnRow ? $grnRow['id'] : null, $poRow ? $poRow['supplier_id'] : null, !empty($_POST['invoice_date']) ? $_POST['invoice_date'] : date('Y-m-d'), $amount, $match, $_POST['notes'] ?? '']);
+            echo json_encode(['success' => true, 'match_status' => $match]);
+        } catch (Exception $e) { echo json_encode(['success' => false, 'message' => $e->getMessage()]); }
+        exit();
+    }
+
+    if ($_GET['action'] == 'approve_invoice') {
+        try {
+            $id = intval($_POST['id'] ?? 0);
+            $pdo->prepare("UPDATE procurement_invoices SET match_status = 'approved' WHERE id = ? AND match_status IN ('matched','approved')")->execute([$id]);
+            echo json_encode(['success' => true]);
+        } catch (Exception $e) { echo json_encode(['success' => false, 'message' => $e->getMessage()]); }
+        exit();
+    }
+
+    // ---- PAYMONGO PAYMENT ----
+    if ($_GET['action'] == 'pay_invoice_paymongo') {
+        try {
+            $id = intval($_POST['id'] ?? 0);
+            $inv = $pdo->prepare("SELECT * FROM procurement_invoices WHERE id = ?"); $inv->execute([$id]);
+            $invoice = $inv->fetch();
+            if (!$invoice) { echo json_encode(['success' => false, 'message' => 'Invoice not found']); exit(); }
+            if ($invoice['payment_status'] === 'paid') { echo json_encode(['success' => false, 'message' => 'Already paid']); exit(); }
+            $secretKey = getSetting('paymongo_secret_key', '');
+            $amount = floatval($invoice['amount']);
+            if ($secretKey === '') {
+                // No key configured: use a realistic simulated PayMongo checkout so the flow works end-to-end
+                $linkId = 'plink_sim_' . bin2hex(random_bytes(6));
+                $checkoutUrl = '?action=paymongo_sim_checkout&invoice_id=' . $id . '&ref=' . $linkId;
+                $pdo->prepare("UPDATE procurement_invoices SET paymongo_link_id = ?, paymongo_checkout_url = ? WHERE id = ?")->execute([$linkId, $checkoutUrl, $id]);
+                $pdo->prepare("INSERT INTO procurement_payments (invoice_id, provider, reference, amount, status) VALUES (?, 'paymongo', ?, ?, 'pending')")
+                    ->execute([$id, $linkId, $amount]);
+                echo json_encode(['success' => true, 'message' => '(Simulated) PayMongo checkout link created. Add a real secret key in Settings to use the live API.', 'checkout_url' => $checkoutUrl]);
+                exit();
+            }
+            $ch = curl_init('https://api.paymongo.com/v1/links');
+            curl_setopt_array($ch, [
+                CURLOPT_RETURNTRANSFER => true,
+                CURLOPT_POST => true,
+                CURLOPT_HTTPHEADER => ['Content-Type: application/json', 'Accept: application/json'],
+                CURLOPT_USERPWD => $secretKey . ':',
+                CURLOPT_POSTFIELDS => json_encode(['data' => ['attributes' => [
+                    'amount' => (int) round($amount * 100),
+                    'description' => 'Invoice ' . $invoice['invoice_number'],
+                    'remarks' => 'Procurement invoice payment'
+                ]]])
+            ]);
+            $resp = curl_exec($ch);
+            $http = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+            curl_close($ch);
+            $data = json_decode($resp, true);
+            if ($http >= 200 && $http < 300 && !empty($data['data']['id'])) {
+                $linkId = $data['data']['id'];
+                $checkoutUrl = $data['data']['attributes']['checkout_url'] ?? '';
+                $pdo->prepare("UPDATE procurement_invoices SET paymongo_link_id = ?, paymongo_checkout_url = ? WHERE id = ?")->execute([$linkId, $checkoutUrl, $id]);
+                $pdo->prepare("INSERT INTO procurement_payments (invoice_id, provider, reference, amount, status) VALUES (?, 'paymongo', ?, ?, 'pending')")->execute([$id, $linkId, $amount]);
+                echo json_encode(['success' => true, 'checkout_url' => $checkoutUrl]);
+            } else {
+                $msg = $data['errors'][0]['detail'] ?? 'PayMongo request failed (HTTP ' . $http . ')';
+                echo json_encode(['success' => false, 'message' => $msg]);
+            }
+        } catch (Exception $e) { echo json_encode(['success' => false, 'message' => $e->getMessage()]); }
+        exit();
+    }
+
+    if ($_GET['action'] == 'mark_invoice_paid') {
+        try {
+            $id = intval($_POST['id'] ?? 0);
+            $pdo->prepare("UPDATE procurement_invoices SET payment_status = 'paid', paid_at = NOW() WHERE id = ?")->execute([$id]);
+            $pdo->prepare("UPDATE procurement_payments SET status = 'paid', paid_at = NOW() WHERE invoice_id = ? AND status = 'pending'")->execute([$id]);
+            $inv = $pdo->prepare("SELECT po_id FROM procurement_invoices WHERE id = ?"); $inv->execute([$id]);
+            $row = $inv->fetch();
+            if ($row && $row['po_id']) {
+                $pdo->prepare("UPDATE procurement_purchase_orders SET status = 'closed' WHERE id = ? AND status IN ('delivered','acknowledged')")->execute([$row['po_id']]);
+            }
+            logActivity('invoice_paid', "Invoice #$id marked paid");
+            echo json_encode(['success' => true]);
+        } catch (Exception $e) { echo json_encode(['success' => false, 'message' => $e->getMessage()]); }
+        exit();
+    }
+
+    // ---- SIMULATED PAYMONGO CHECKOUT (used when no API key is configured) ----
+    if ($_GET['action'] == 'paymongo_sim_checkout') {
+        header('Content-Type: text/html; charset=utf-8');
+        $id = intval($_GET['invoice_id'] ?? 0);
+        $inv = $pdo->prepare("SELECT * FROM procurement_invoices WHERE id = ?"); $inv->execute([$id]);
+        $invoice = $inv->fetch();
+        if (!$invoice) { echo 'Invoice not found'; exit(); }
+        if ($invoice['payment_status'] === 'paid') {
+            echo '<!DOCTYPE html><html><head><meta charset="utf-8"><title>Already Paid</title>
+            <style>body{font-family:Arial;background:#0f172a;color:#fff;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;text-align:center}
+            .card{background:#fff;color:#111827;border-radius:16px;padding:40px;max-width:400px}</style></head>
+            <body><div class="card"><h1 style="color:#10b981">✓ Already Paid</h1>
+            <p>Invoice ' . htmlspecialchars($invoice['invoice_number']) . ' was paid on ' . htmlspecialchars($invoice['paid_at']) . '.</p>
+            <p><a href="?page=procurement">Back to Procurement</a></p></div></body></html>';
+            exit();
+        }
+        $amount = number_format(floatval($invoice['amount']), 2);
+        echo '<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>PayMongo Checkout</title>
+        <style>
+        *{box-sizing:border-box}
+        body{font-family:Inter,-apple-system,"Segoe UI",Arial,sans-serif;background:#0f172a;margin:0;min-height:100vh;display:flex;flex-direction:column}
+        .top{background:#0b1220;color:#fff;padding:18px 24px;text-align:center;border-bottom:1px solid #1e293b}
+        .top .logo{font-weight:800;font-size:22px;letter-spacing:.5px}
+        .top .logo span{color:#38bdf8}
+        .wrap{flex:1;display:flex;align-items:center;justify-content:center;padding:24px}
+        .card{background:#fff;border-radius:16px;box-shadow:0 20px 60px rgba(0,0,0,.4);padding:28px;width:440px;max-width:94vw}
+        .brand{font-size:12px;color:#6b7280;text-transform:uppercase;letter-spacing:1px}
+        .amt{font-size:32px;font-weight:800;color:#111827;margin:6px 0 2px}
+        .inv{font-size:13px;color:#6b7280;margin-bottom:18px}
+        .label{font-size:13px;font-weight:700;color:#374151;margin:14px 0 8px}
+        .methods{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+        .m{border:1.5px solid #e5e7eb;border-radius:10px;padding:12px;cursor:pointer;display:flex;align-items:center;gap:8px;font-weight:600;color:#374151;font-size:14px}
+        .m:hover{border-color:#3b82f6}
+        .m.sel{border-color:#3b82f6;background:#eff6ff;color:#1d4ed8}
+        .m .dot{width:34px;height:22px;border-radius:5px;display:inline-flex;align-items:center;justify-content:center;color:#fff;font-size:10px;font-weight:800}
+        .gcash{background:#007dfe}.maya{background:#0aa44f}.grabpay{background:#00b14f}.cardbg{background:#111827}
+        .field{margin:8px 0}
+        .field input{width:100%;padding:12px;border:1.5px solid #e5e7eb;border-radius:10px;font-size:14px}
+        .row{display:flex;gap:8px}.row .field{flex:1}
+        button{width:100%;margin-top:18px;padding:14px;border:none;border-radius:10px;background:#3b82f6;color:#fff;font-weight:700;font-size:15px;cursor:pointer}
+        button:hover{background:#2563eb}
+        .note{font-size:11px;color:#9ca3af;margin-top:12px;text-align:center}
+        </style></head><body>
+        <div class="top"><div class="logo">Pay<span>Mongo</span></div></div>
+        <div class="wrap"><div class="card">
+        <div class="brand">' . htmlspecialchars(getSetting('store_name', 'Store')) . '</div>
+        <div class="amt">₱' . $amount . '</div>
+        <div class="inv">Invoice ' . htmlspecialchars($invoice['invoice_number']) . ' · Procurement payment</div>
+        <form method="POST" action="?action=paymongo_sim_pay">
+        <input type="hidden" name="invoice_id" value="' . $id . '">
+        <div class="label">Select payment method</div>
+        <div class="methods">
+          <div class="m sel" onclick="sel(this,\'gcash\')"><span class="dot gcash">G</span>GCash</div>
+          <div class="m" onclick="sel(this,\'maya\')"><span class="dot maya">M</span>Maya</div>
+          <div class="m" onclick="sel(this,\'grabpay\')"><span class="dot grabpay">GP</span>GrabPay</div>
+          <div class="m" onclick="sel(this,\'card\')"><span class="dot cardbg">CARD</span>Card</div>
+        </div>
+        <div id="cardFields" style="display:none">
+          <div class="field"><input placeholder="Card number (4242 4242 4242 4242)"></div>
+          <div class="row">
+            <div class="field"><input placeholder="MM / YY"></div>
+            <div class="field"><input placeholder="CVC"></div>
+          </div>
+        </div>
+        <div id="ewalletFields">
+          <div class="field"><input placeholder="09XX XXX XXXX"></div>
+        </div>
+        <input type="hidden" name="method" id="method" value="gcash">
+        <button type="submit">Pay ₱' . $amount . '</button>
+        </form>
+        <p class="note">Test checkout · No real charge · Simulated PayMongo page</p>
+        </div></div>
+        <script>function sel(el,m){document.querySelectorAll(".m").forEach(function(x){x.classList.remove("sel")});el.classList.add("sel");document.getElementById("method").value=m;
+        document.getElementById("cardFields").style.display = (m==="card") ? "block" : "none";
+        document.getElementById("ewalletFields").style.display = (m==="card") ? "none" : "block";}</script>
+        </body></html>';
+        exit();
+    }
+
+    if ($_GET['action'] == 'paymongo_sim_pay') {
+        header('Content-Type: text/html; charset=utf-8');
+        $id = intval($_POST['invoice_id'] ?? 0);
+        $method = $_POST['method'] ?? 'gcash';
+        $pdo->prepare("UPDATE procurement_invoices SET payment_status = 'paid', paid_at = NOW() WHERE id = ?")->execute([$id]);
+        $pdo->prepare("UPDATE procurement_payments SET status = 'paid', paid_at = NOW(), provider = ? WHERE invoice_id = ? AND status = 'pending'")->execute(['paymongo_' . $method, $id]);
+        $inv = $pdo->prepare("SELECT po_id FROM procurement_invoices WHERE id = ?"); $inv->execute([$id]);
+        $poRow = $inv->fetch();
+        if ($poRow && $poRow['po_id']) {
+            $pdo->prepare("UPDATE procurement_purchase_orders SET status = 'closed' WHERE id = ? AND status IN ('delivered','acknowledged')")->execute([$poRow['po_id']]);
+        }
+        echo '<!DOCTYPE html><html><head><meta charset="utf-8"><title>Payment Successful</title></head><body style="font-family:Arial;text-align:center;padding-top:80px">
+        <h1 style="color:#10b981">Payment Successful</h1>
+        <p>Paid via ' . htmlspecialchars(strtoupper($method)) . ' (simulated).</p>
+        <p><a href="?page=procurement">Back to Procurement</a></p></body></html>';
+        exit();
+    }
+
+    // ---- SUPPLIER PAYMENT (real-world: bank transfer / check) ----
+    if ($_GET['action'] == 'save_supplier_payment') {
+        try {
+            $id = intval($_POST['invoice_id'] ?? 0);
+            $method = $_POST['method'] ?? 'bank_transfer';
+            if (!in_array($method, ['bank_transfer', 'check', 'cash'], true)) $method = 'bank_transfer';
+            $inv = $pdo->prepare("SELECT * FROM procurement_invoices WHERE id = ?"); $inv->execute([$id]);
+            $invoice = $inv->fetch();
+            if (!$invoice) { echo json_encode(['success' => false, 'message' => 'Invoice not found']); exit(); }
+            if ($invoice['payment_status'] === 'paid') { echo json_encode(['success' => false, 'message' => 'Already paid']); exit(); }
+            $stmt = $pdo->prepare("INSERT INTO procurement_payments (invoice_id, provider, reference, amount, status) VALUES (?, ?, ?, ?, 'pending')");
+            $stmt->execute([$id, $method, trim($_POST['reference'] ?? ''), floatval($invoice['amount'])]);
+            logActivity('supplier_payment', "$method payment recorded for invoice #$id, ref: " . ($_POST['reference'] ?? ''));
+            echo json_encode(['success' => true]);
+        } catch (Exception $e) { echo json_encode(['success' => false, 'message' => $e->getMessage()]); }
+        exit();
+    }
+
+    if ($_GET['action'] == 'confirm_payment') {
+        try {
+            $id = intval($_POST['invoice_id'] ?? 0);
+            $pdo->prepare("UPDATE procurement_invoices SET payment_status = 'paid', paid_at = NOW() WHERE id = ? AND payment_status = 'unpaid'")->execute([$id]);
+            $pdo->prepare("UPDATE procurement_payments SET status = 'paid', paid_at = NOW() WHERE invoice_id = ? AND status = 'pending'")->execute([$id]);
+            $inv = $pdo->prepare("SELECT po_id FROM procurement_invoices WHERE id = ?"); $inv->execute([$id]);
+            $row = $inv->fetch();
+            if ($row && $row['po_id']) {
+                $pdo->prepare("UPDATE procurement_purchase_orders SET status = 'closed' WHERE id = ? AND status IN ('delivered','acknowledged')")->execute([$row['po_id']]);
+            }
+            logActivity('payment_confirmed', "Payment confirmed for invoice #$id");
+            echo json_encode(['success' => true]);
+        } catch (Exception $e) { echo json_encode(['success' => false, 'message' => $e->getMessage()]); }
+        exit();
+    }
+
+    // ---- JOB POSTINGS ----
+    if ($_GET['action'] == 'get_job_postings') {
+        try {
+            $stmt = $pdo->query("SELECT j.*, u.full_name AS created_by_name FROM job_postings j LEFT JOIN users u ON j.created_by = u.id ORDER BY j.created_at DESC LIMIT 200");
+            echo json_encode($stmt->fetchAll());
+        } catch (Exception $e) { echo json_encode([]); }
+        exit();
+    }
+
+    if ($_GET['action'] == 'save_job_posting') {
+        if (!hasRole('hr') && !isAdmin()) { echo json_encode(['success' => false, 'message' => 'HR role required']); exit(); }
+        try {
+            $title = trim($_POST['title'] ?? '');
+            if ($title === '') { echo json_encode(['success' => false, 'message' => 'Title required']); exit(); }
+            $stmt = $pdo->prepare("INSERT INTO job_postings (title, department, location, type, salary_min, salary_max, description, requirements, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)");
+            $stmt->execute([
+                $title,
+                $_POST['department'] ?? '',
+                $_POST['location'] ?? '',
+                in_array($_POST['type'] ?? '', ['full_time','part_time','contract','internship'], true) ? $_POST['type'] : 'full_time',
+                floatval($_POST['salary_min'] ?? 0) ?: null,
+                floatval($_POST['salary_max'] ?? 0) ?: null,
+                $_POST['description'] ?? '',
+                $_POST['requirements'] ?? '',
+                $_SESSION['user_id']
+            ]);
+            logActivity('job_posting', "Posted job: $title");
+            echo json_encode(['success' => true]);
+        } catch (Exception $e) { echo json_encode(['success' => false, 'message' => $e->getMessage()]); }
+        exit();
+    }
+
+    if ($_GET['action'] == 'update_job_posting_status') {
+        if (!hasRole('hr') && !isAdmin()) { echo json_encode(['success' => false, 'message' => 'HR role required']); exit(); }
+        try {
+            $id = intval($_POST['id'] ?? 0);
+            $status = in_array($_POST['status'] ?? '', ['open', 'closed'], true) ? $_POST['status'] : 'open';
+            $pdo->prepare("UPDATE job_postings SET status = ? WHERE id = ?")->execute([$status, $id]);
+            logActivity('job_posting_status', "Job posting #$id marked $status");
+            echo json_encode(['success' => true]);
+        } catch (Exception $e) { echo json_encode(['success' => false, 'message' => $e->getMessage()]); }
+        exit();
+    }
+
+    // ---- SUPPLIER RATINGS ----
+    if ($_GET['action'] == 'rate_supplier') {
+        try {
+            $supplier_id = intval($_POST['supplier_id'] ?? 0);
+            if (!$supplier_id) { echo json_encode(['success' => false, 'message' => 'Supplier required']); exit(); }
+            $stmt = $pdo->prepare("INSERT INTO procurement_supplier_ratings (supplier_id, po_id, otif_score, quality_score, responsiveness_score, comments, rated_by) VALUES (?, ?, ?, ?, ?, ?, ?)");
+            $stmt->execute([
+                $supplier_id,
+                !empty($_POST['po_id']) ? intval($_POST['po_id']) : null,
+                max(1, min(5, intval($_POST['otif_score'] ?? 0))),
+                max(1, min(5, intval($_POST['quality_score'] ?? 0))),
+                max(1, min(5, intval($_POST['responsiveness_score'] ?? 0))),
+                $_POST['comments'] ?? '',
+                $_SESSION['user_id']
+            ]);
+            echo json_encode(['success' => true]);
+        } catch (Exception $e) { echo json_encode(['success' => false, 'message' => $e->getMessage()]); }
+        exit();
+    }
+
+    if ($_GET['action'] == 'get_ratings') {
+        try {
+            $stmt = $pdo->query("SELECT r.*, s.name AS supplier_name FROM procurement_supplier_ratings r LEFT JOIN suppliers s ON r.supplier_id = s.id ORDER BY r.created_at DESC LIMIT 200");
+            echo json_encode($stmt->fetchAll());
+        } catch (Exception $e) { echo json_encode([]); }
         exit();
     }
 
@@ -1559,11 +2516,16 @@ if (isset($_GET['action'])) {
                 $_POST['email'] ?? '',
                 $_POST['address'] ?? '',
                 $_POST['notes'] ?? '',
-                $_POST['status'] ?? 'active'
+                $_POST['status'] ?? 'active',
+                $_POST['supplier_type'] ?? 'other_source'
             ];
             
             if (empty($data[0])) {
                 echo json_encode(['success' => false, 'message' => 'Supplier name is required']);
+                exit();
+            }
+            if (!in_array($data[7], ['direct_supplier', 'distributor', 'wholesaler', 'other_source'], true)) {
+                echo json_encode(['success' => false, 'message' => 'Invalid supplier type']);
                 exit();
             }
             
@@ -1571,7 +2533,7 @@ if (isset($_GET['action'])) {
                 $stmt = $pdo->prepare("
                     UPDATE suppliers SET 
                         name = ?, contact_person = ?, phone = ?, email = ?, 
-                        address = ?, notes = ?, status = ?
+                        address = ?, notes = ?, status = ?, supplier_type = ?
                     WHERE id = ?
                 ");
                 $data[] = $id;
@@ -1580,8 +2542,8 @@ if (isset($_GET['action'])) {
             } else {
                 $stmt = $pdo->prepare("
                     INSERT INTO suppliers 
-                    (name, contact_person, phone, email, address, notes, status) 
-                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                    (name, contact_person, phone, email, address, notes, status, supplier_type)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 ");
                 $stmt->execute($data);
                 logActivity('add_supplier', "Added supplier: {$data[0]}");
@@ -1626,7 +2588,7 @@ if (isset($_GET['action'])) {
     // ---- GET SUPPLIERS (for dropdown) ----
     if ($_GET['action'] == 'get_suppliers') {
         try {
-            $stmt = $pdo->query("SELECT id, name FROM suppliers WHERE status = 'active' ORDER BY name");
+            $stmt = $pdo->query("SELECT id, name, supplier_type FROM suppliers WHERE status = 'active' ORDER BY name");
             echo json_encode($stmt->fetchAll());
         } catch (Exception $e) {
             echo json_encode([]);

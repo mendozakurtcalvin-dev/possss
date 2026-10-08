@@ -303,7 +303,7 @@ case 'users':
                             <?php foreach (getCustomRoles() as $customRole): ?>
                             <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 12px;border:1px solid #e5e7eb;border-radius:6px;">
                                 <div><strong><?php echo htmlspecialchars($customRole['role_name']); ?></strong><div style="font-size:12px;color:#64748b;"><?php echo count($customRole['permissions']); ?> permissions</div></div>
-                                <?php if (isAdmin()): ?>
+                                <?php if (isAdmin() || hasRole('hr')): ?>
                                 <div style="display:flex;gap:8px;">
                                     <button class="usr-btn-cancel" type="button" onclick="editCustomRole(this)" data-role-key="<?php echo htmlspecialchars($customRole['role_key'], ENT_QUOTES, 'UTF-8'); ?>" data-role-name="<?php echo htmlspecialchars($customRole['role_name'], ENT_QUOTES, 'UTF-8'); ?>" data-permissions="<?php echo htmlspecialchars(json_encode($customRole['permissions']), ENT_QUOTES, 'UTF-8'); ?>">Edit</button>
                                     <button class="usr-btn-cancel" type="button" onclick="deleteCustomRole('<?php echo htmlspecialchars($customRole['role_key'], ENT_QUOTES, 'UTF-8'); ?>')">Delete</button>

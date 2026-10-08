@@ -32,6 +32,33 @@ session_set_cookie_params([
 ]);
 session_start();
 
+if (file_exists(__DIR__ . '/../vendor/autoload.php')) {
+    require_once __DIR__ . '/../vendor/autoload.php';
+}
+require_once __DIR__ . '/mail.php';
+require_once __DIR__ . '/emailjs.php';
+
+// ============================================
+// SECURITY HEADERS
+// ============================================
+header('X-Frame-Options: SAMEORIGIN');
+header('X-Content-Type-Options: nosniff');
+header('Referrer-Policy: strict-origin-when-cross-origin');
+header("Content-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; form-action 'self'");
+if (empty($_SESSION['csrf_token'])) {
+    $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
+}
+function csrfToken() {
+    return $_SESSION['csrf_token'] ?? '';
+}
+function verifyCsrf() {
+    $token = $_POST['csrf_token'] ?? ($_SERVER['HTTP_X_CSRF_TOKEN'] ?? '');
+    if (empty($token) || !hash_equals($_SESSION['csrf_token'] ?? '', $token)) {
+        echo json_encode(['success' => false, 'message' => 'Invalid or missing security token. Please refresh and try again.']);
+        exit();
+    }
+}
+
 // ============================================
 // SETTINGS FUNCTIONS
 // ============================================
@@ -115,7 +142,8 @@ function getRolePermissionOptions() {
         'purchases' => 'Purchases', 'purchases_create' => 'Create purchases',
         'purchases_view' => 'View purchases', 'suppliers' => 'Suppliers',
         'suppliers_create' => 'Create suppliers', 'suppliers_edit' => 'Edit suppliers',
-        'inventory_reports' => 'Inventory reports'
+        'inventory_reports' => 'Inventory reports', 'procurement' => 'Procurement',
+        'procurement_manage' => 'Manage procurement'
     ];
 }
 
@@ -123,9 +151,220 @@ function getAssignableRoleKeys() {
     return array_merge(['admin', 'cashier', 'inventory', 'hr', 'finance'], array_column(getCustomRoles(), 'role_key'));
 }
 
+function ensureProcurementTables() {
+    global $pdo;
+    // Extend procurement_requests for the full workflow (budget check, cost centre)
+    try { $pdo->exec("ALTER TABLE procurement_requests ADD COLUMN cost_centre VARCHAR(100) DEFAULT NULL"); } catch (PDOException $e) {}
+    try { $pdo->exec("ALTER TABLE procurement_requests ADD COLUMN budget_status ENUM('pending','approved','rejected') NOT NULL DEFAULT 'pending'"); } catch (PDOException $e) {}
+    try { $pdo->exec("ALTER TABLE procurement_requests ADD COLUMN budget_checked_by INT DEFAULT NULL"); } catch (PDOException $e) {}
+    try { $pdo->exec("ALTER TABLE procurement_quotations ADD COLUMN negotiation_notes TEXT"); } catch (PDOException $e) {}
+
+    $pdo->exec("CREATE TABLE IF NOT EXISTS procurement_rfqs (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        rfq_number VARCHAR(50) NOT NULL UNIQUE,
+        request_id INT DEFAULT NULL,
+        title VARCHAR(255) NOT NULL,
+        item_name VARCHAR(255) DEFAULT NULL,
+        quantity INT NOT NULL DEFAULT 1,
+        estimated_value DECIMAL(12,2) DEFAULT 0.00,
+        deadline DATE DEFAULT NULL,
+        status ENUM('draft','sent','evaluating','awarded','cancelled') NOT NULL DEFAULT 'draft',
+        notes TEXT,
+        created_by INT DEFAULT NULL,
+        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+
+    $pdo->exec("CREATE TABLE IF NOT EXISTS procurement_quotations (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        rfq_id INT NOT NULL,
+        supplier_id INT NOT NULL,
+        unit_price DECIMAL(12,2) NOT NULL DEFAULT 0.00,
+        total_price DECIMAL(12,2) NOT NULL DEFAULT 0.00,
+        lead_time_days INT DEFAULT NULL,
+        payment_terms VARCHAR(100) DEFAULT NULL,
+        notes TEXT,
+        is_selected TINYINT(1) NOT NULL DEFAULT 0,
+        finance_terms_ok TINYINT(1) DEFAULT NULL,
+        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+
+    $pdo->exec("CREATE TABLE IF NOT EXISTS procurement_purchase_orders (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        po_number VARCHAR(50) NOT NULL UNIQUE,
+        request_id INT DEFAULT NULL,
+        rfq_id INT DEFAULT NULL,
+        supplier_id INT NOT NULL,
+        order_date DATE NOT NULL,
+        expected_delivery DATE DEFAULT NULL,
+        subtotal DECIMAL(12,2) DEFAULT 0.00,
+        tax_amount DECIMAL(12,2) DEFAULT 0.00,
+        total_amount DECIMAL(12,2) DEFAULT 0.00,
+        payment_terms VARCHAR(100) DEFAULT NULL,
+        status ENUM('draft','pending','finance_pending','approved','sent','acknowledged','partially_received','delivered','received','closed','cancelled') NOT NULL DEFAULT 'draft',
+        finance_approved_by INT DEFAULT NULL,
+        supplier_ack TINYINT(1) NOT NULL DEFAULT 0,
+        notes TEXT,
+        created_by INT DEFAULT NULL,
+        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP NULL DEFAULT NULL ON UPDATE CURRENT_TIMESTAMP
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+
+    $pdo->exec("CREATE TABLE IF NOT EXISTS procurement_po_items (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        po_id INT NOT NULL,
+        product_id INT DEFAULT NULL,
+        item_name VARCHAR(255) NOT NULL,
+        quantity INT NOT NULL DEFAULT 1,
+        quantity_received INT NOT NULL DEFAULT 0,
+        quantity_remaining INT NOT NULL DEFAULT 0,
+        unit_cost DECIMAL(12,2) NOT NULL DEFAULT 0.00,
+        total_cost DECIMAL(12,2) NOT NULL DEFAULT 0.00,
+        received_at DATETIME DEFAULT NULL,
+        inventory_updated_at DATETIME DEFAULT NULL
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+
+    $pdo->exec("CREATE TABLE IF NOT EXISTS procurement_grns (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        grn_number VARCHAR(50) NOT NULL UNIQUE,
+        po_id INT NOT NULL,
+        received_date DATE NOT NULL,
+        received_by INT DEFAULT NULL,
+        discrepancies TEXT,
+        status ENUM('received','partial','discrepancy') NOT NULL DEFAULT 'received',
+        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+
+    $pdo->exec("CREATE TABLE IF NOT EXISTS inventory_transactions (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        product_id INT NOT NULL,
+        transaction_type VARCHAR(30) NOT NULL,
+        quantity INT NOT NULL,
+        previous_stock INT NOT NULL,
+        new_stock INT NOT NULL,
+        reference_type VARCHAR(30) DEFAULT NULL,
+        reference_id INT DEFAULT NULL,
+        created_by INT DEFAULT NULL,
+        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        KEY idx_inventory_transactions_product (product_id, created_at),
+        KEY idx_inventory_transactions_reference (reference_type, reference_id)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+
+    $pdo->exec("CREATE TABLE IF NOT EXISTS procurement_invoices (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        invoice_number VARCHAR(50) NOT NULL UNIQUE,
+        po_id INT NOT NULL,
+        grn_id INT DEFAULT NULL,
+        supplier_id INT DEFAULT NULL,
+        invoice_date DATE DEFAULT NULL,
+        amount DECIMAL(12,2) NOT NULL DEFAULT 0.00,
+        match_status ENUM('pending','matched','mismatch','held','approved') NOT NULL DEFAULT 'pending',
+        payment_status ENUM('unpaid','paid','void') NOT NULL DEFAULT 'unpaid',
+        paymongo_link_id VARCHAR(100) DEFAULT NULL,
+        paymongo_checkout_url VARCHAR(500) DEFAULT NULL,
+        paid_at DATETIME DEFAULT NULL,
+        notes TEXT,
+        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+
+    $pdo->exec("CREATE TABLE IF NOT EXISTS procurement_payments (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        invoice_id INT NOT NULL,
+        provider VARCHAR(30) NOT NULL DEFAULT 'paymongo',
+        reference VARCHAR(100) DEFAULT NULL,
+        amount DECIMAL(12,2) NOT NULL DEFAULT 0.00,
+        status ENUM('pending','paid','failed') NOT NULL DEFAULT 'pending',
+        paid_at DATETIME DEFAULT NULL,
+        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+
+    $pdo->exec("CREATE TABLE IF NOT EXISTS procurement_supplier_ratings (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        supplier_id INT NOT NULL,
+        po_id INT DEFAULT NULL,
+        otif_score INT DEFAULT NULL,
+        quality_score INT DEFAULT NULL,
+        responsiveness_score INT DEFAULT NULL,
+        comments TEXT,
+        rated_by INT DEFAULT NULL,
+        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+
+    $migrationColumns = [
+        'suppliers' => [
+            'supplier_type' => "VARCHAR(30) NOT NULL DEFAULT 'other_source'",
+        ],
+        'procurement_po_items' => [
+            'quantity_received' => 'INT NOT NULL DEFAULT 0',
+            'quantity_remaining' => 'INT NOT NULL DEFAULT 0',
+            'received_at' => 'DATETIME DEFAULT NULL',
+            'inventory_updated_at' => 'DATETIME DEFAULT NULL',
+        ],
+        'procurement_purchase_orders' => [
+            'updated_at' => 'TIMESTAMP NULL DEFAULT NULL ON UPDATE CURRENT_TIMESTAMP',
+        ],
+    ];
+    foreach ($migrationColumns as $table => $columns) {
+        foreach ($columns as $column => $definition) {
+            $check = $pdo->prepare(
+                'SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ?'
+            );
+            $check->execute([$table, $column]);
+            if (!(int) $check->fetchColumn()) {
+                $pdo->exec("ALTER TABLE `$table` ADD COLUMN `$column` $definition");
+            }
+        }
+    }
+    $statusCheck = $pdo->prepare(
+        "SELECT COLUMN_TYPE FROM information_schema.COLUMNS
+         WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'procurement_purchase_orders' AND COLUMN_NAME = 'status'"
+    );
+    $statusCheck->execute();
+    $poStatusType = (string)$statusCheck->fetchColumn();
+    if (strpos($poStatusType, "'draft'") === false || strpos($poStatusType, "'ordered'") === false ||
+        strpos($poStatusType, "'partially_received'") === false) {
+        $pdo->exec("ALTER TABLE procurement_purchase_orders MODIFY status ENUM(
+            'draft','pending','finance_pending','approved','ordered','sent','acknowledged',
+            'partially_received','delivered','received','closed','cancelled'
+        ) NOT NULL DEFAULT 'draft'");
+    }
+
+    $pdo->exec("CREATE TABLE IF NOT EXISTS procurement_product_evaluations (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        product_id INT NOT NULL,
+        supplier_id INT NOT NULL,
+        quality_score TINYINT UNSIGNED NOT NULL,
+        availability_score TINYINT UNSIGNED NOT NULL,
+        unit_price DECIMAL(12,2) NOT NULL DEFAULT 0.00,
+        lead_time_days INT NOT NULL DEFAULT 0,
+        minimum_order_quantity INT NOT NULL DEFAULT 1,
+        recommendation ENUM('long_term','short_term','needs_review','not_recommended') NOT NULL DEFAULT 'needs_review',
+        evaluation_notes TEXT,
+        evaluated_by INT DEFAULT NULL,
+        updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        UNIQUE KEY unique_product_supplier_evaluation (product_id, supplier_id),
+        KEY idx_product_evaluation_product (product_id),
+        KEY idx_product_evaluation_supplier (supplier_id)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+}
+
 try {
     ensureCustomRolesTable();
     ensureSavedLoginAccountsTable();
+    ensureProcurementTables();
+    $pdo->exec("CREATE TABLE IF NOT EXISTS job_postings (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        title VARCHAR(150) NOT NULL,
+        department VARCHAR(100) DEFAULT NULL,
+        location VARCHAR(150) DEFAULT NULL,
+        type ENUM('full_time','part_time','contract','internship') NOT NULL DEFAULT 'full_time',
+        salary_min DECIMAL(12,2) DEFAULT NULL,
+        salary_max DECIMAL(12,2) DEFAULT NULL,
+        description TEXT,
+        requirements TEXT,
+        status ENUM('open','closed') NOT NULL DEFAULT 'open',
+        created_by INT DEFAULT NULL,
+        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
 } catch (PDOException $e) {
     error_log('Unable to initialize application tables: ' . $e->getMessage());
 }
@@ -446,7 +685,7 @@ function hasPermission($permission) {
     'finance' => [
         'dashboard', 'finance_dashboard', 'finance_reports', 'finance',
         'returns', 'returns_approve', 'returns_reports',
-        'customer_reports'
+        'customer_reports', 'procurement'
     ],
 ];
 

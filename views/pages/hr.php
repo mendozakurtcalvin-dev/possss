@@ -202,7 +202,7 @@ case 'hr':
                         <div class="hr-stat-footer">Click to review</div>
                     </div>
                     
-                    <div class="hr-stat-card" onclick="processPayroll()" style="cursor:pointer;">
+                    <div class="hr-stat-card" id="payroll" onclick="processPayroll()" style="cursor:pointer;">
                         <div class="hr-stat-icon" style="background: linear-gradient(135deg, #8B5CF6 0%, #7C3AED 100%);">
                             <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
                                 <line x1="12" y1="1" x2="12" y2="23"></line>
@@ -872,6 +872,7 @@ case 'hr':
 
                     // ===== BUILD FORM DATA =====
                     var data = new FormData();
+                    data.append('csrf_token', window.CSRF_TOKEN || '');
                     data.append('id', id);
                     data.append('employee_id', empCode);
                     data.append('first_name', firstName);
@@ -916,7 +917,13 @@ case 'hr':
                         }
                         
                         if (result.success) {
-                            alert('✅ Employee saved successfully!');
+                            var saveMessage = '✅ Employee saved successfully!';
+                            if (result.email_sent === true) {
+                                saveMessage += '\n📧 Welcome email sent.';
+                            } else if (result.email_sent === false) {
+                                saveMessage += '\n⚠️ Welcome email was not sent: ' + (result.email_message || 'Check EmailJS settings.');
+                            }
+                            alert(saveMessage);
                             closeModal('employeeModal');
                             location.reload();
                         } else {

@@ -13,8 +13,26 @@ case 'suppliers':
                         
                         $suppliers = $pdo->query("
                             SELECT s.*, 
-                                (SELECT COUNT(*) FROM purchases WHERE supplier_id = s.id) as purchase_count,
-                                (SELECT COALESCE(SUM(total_amount), 0) FROM purchases WHERE supplier_id = s.id) as total_spent
+                                (SELECT COUNT(*) FROM purchases WHERE supplier_id = s.id) +
+                                (SELECT COUNT(*) FROM procurement_purchase_orders po
+                                 WHERE po.supplier_id = s.id
+                                 AND po.status IN ('ordered','sent','acknowledged','partially_received','delivered','received','closed')) as purchase_count,
+                                (SELECT COALESCE(SUM(total_amount), 0) FROM purchases WHERE supplier_id = s.id) +
+                                (SELECT COALESCE(SUM(
+                                    CASE
+                                        WHEN po.status IN ('received','closed','delivered') THEN po.total_amount
+                                        WHEN po.status = 'partially_received' THEN po.total_amount * (
+                                            SELECT COALESCE(
+                                                SUM(pi.quantity_received * pi.unit_cost) / NULLIF(SUM(pi.quantity * pi.unit_cost), 0),
+                                                0
+                                            )
+                                            FROM procurement_po_items pi WHERE pi.po_id = po.id
+                                        )
+                                        ELSE 0
+                                    END
+                                ), 0)
+                                 FROM procurement_purchase_orders po
+                                 WHERE po.supplier_id = s.id) as total_spent
                             FROM suppliers s 
                             ORDER BY s.name
                         ")->fetchAll();
@@ -148,6 +166,7 @@ case 'suppliers':
                                     <thead>
                                         <tr>
                                             <th>Supplier</th>
+                                            <th>Source Type</th>
                                             <th>Contact Person</th>
                                             <th>Phone</th>
                                             <th>Email</th>
@@ -174,6 +193,7 @@ case 'suppliers':
                                                     </div>
                                                 </div>
                                             </td>
+                                            <td><?php echo htmlspecialchars(ucwords(str_replace('_', ' ', $s['supplier_type'] ?? 'other_source'))); ?></td>
                                             <td><?php echo htmlspecialchars($s['contact_person'] ?? '—'); ?></td>
                                             <td>
                                                 <?php if (!empty($s['phone'])): ?>
@@ -248,6 +268,16 @@ case 'suppliers':
                                     </div>
                                     
                                     <div class="inv-form-group">
+                                        <label class="inv-form-label">Supplier Type</label>
+                                        <select id="supplierType" class="inv-form-select">
+                                            <option value="direct_supplier">Direct Supplier</option>
+                                            <option value="distributor">Distributor</option>
+                                            <option value="wholesaler">Wholesaler</option>
+                                            <option value="other_source">Other Source</option>
+                                        </select>
+                                    </div>
+
+                                    <div class="inv-form-group">
                                         <label class="inv-form-label">Contact Person</label>
                                         <input type="text" id="supplierContact" placeholder="Full name" class="inv-form-input">
                                     </div>
@@ -317,6 +347,7 @@ case 'suppliers':
                             document.getElementById('supplierAddress').value = '';
                             document.getElementById('supplierNotes').value = '';
                             document.getElementById('supplierStatus').value = 'active';
+                            document.getElementById('supplierType').value = 'other_source';
                             document.getElementById('supplierModal').classList.add('show');
                         }
                         
@@ -330,6 +361,7 @@ case 'suppliers':
                             document.getElementById('supplierAddress').value = s.address || '';
                             document.getElementById('supplierNotes').value = s.notes || '';
                             document.getElementById('supplierStatus').value = s.status || 'active';
+                            document.getElementById('supplierType').value = s.supplier_type || 'other_source';
                             document.getElementById('supplierModal').classList.add('show');
                         }
                         
@@ -344,6 +376,7 @@ case 'suppliers':
                             data.append('address', document.getElementById('supplierAddress').value);
                             data.append('notes', document.getElementById('supplierNotes').value);
                             data.append('status', document.getElementById('supplierStatus').value);
+                            data.append('supplier_type', document.getElementById('supplierType').value);
                             
                             fetch('?action=save_supplier', { method: 'POST', body: data })
                             .then(function(res) { return res.json(); })

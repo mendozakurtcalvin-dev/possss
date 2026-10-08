@@ -9,7 +9,6 @@ case 'settings':
                 
                 // Handle settings save
                 if (isset($_POST['save_settings'])) {
-                    error_log('SETTINGS POST DATA: ' . print_r($_POST, true));
                     $success = true;
                     $message = 'Settings saved successfully!';
                     
@@ -23,6 +22,42 @@ case 'settings':
                         }
                         setSetting('store_address', isset($_POST['store_address']) ? trim($_POST['store_address']) : '');
                         setSetting('store_contact', isset($_POST['store_contact']) ? trim($_POST['store_contact']) : '');
+                        setSetting('paymongo_secret_key', isset($_POST['paymongo_secret_key']) ? trim($_POST['paymongo_secret_key']) : '');
+                        setSetting('paymongo_public_key', isset($_POST['paymongo_public_key']) ? trim($_POST['paymongo_public_key']) : '');
+                        setSetting('mail_enabled', isset($_POST['mail_enabled']) ? '1' : '0');
+                        setSetting('smtp_host', isset($_POST['smtp_host']) ? trim($_POST['smtp_host']) : 'smtp.gmail.com');
+                        setSetting('smtp_port', isset($_POST['smtp_port']) ? trim($_POST['smtp_port']) : '587');
+                        setSetting('smtp_encryption', isset($_POST['smtp_encryption']) ? trim($_POST['smtp_encryption']) : 'tls');
+                        setSetting('smtp_username', isset($_POST['smtp_username']) ? trim($_POST['smtp_username']) : '');
+                        setSetting('smtp_password', isset($_POST['smtp_password']) ? trim($_POST['smtp_password']) : '');
+                        setSetting('mail_from_name', isset($_POST['mail_from_name']) ? trim($_POST['mail_from_name']) : 'Smart Market POS');
+                        setSetting('mail_from_address', isset($_POST['mail_from_address']) ? trim($_POST['mail_from_address']) : 'noreply@localhost');
+                        $emailjsSettings = [
+                            'emailjs_service_id' => trim($_POST['emailjs_service_id'] ?? ''),
+                            'emailjs_template_id' => trim($_POST['emailjs_template_id'] ?? ''),
+                            'emailjs_public_key' => trim($_POST['emailjs_public_key'] ?? ''),
+                        ];
+                        $configuredEmailjsValues = array_filter($emailjsSettings, function ($value) {
+                            return $value !== '';
+                        });
+                        if (!empty($configuredEmailjsValues) && count($configuredEmailjsValues) !== count($emailjsSettings)) {
+                            throw new RuntimeException('Enter the EmailJS Service ID, Template ID, and Public Key, or clear all three fields.');
+                        }
+                        foreach ($emailjsSettings as $key => $value) {
+                            if (!setSetting($key, $value)) {
+                                throw new RuntimeException('Could not save EmailJS settings. Please retry or check the database connection.');
+                            }
+                        }
+                        foreach ($emailjsSettings as $key => $value) {
+                            if ((string) getSetting($key, '') !== $value) {
+                                throw new RuntimeException('EmailJS settings were not saved. Please retry.');
+                            }
+                        }
+                        if (!empty($_POST['emailjs_private_key'])) {
+                            if (!setSetting('emailjs_private_key', trim($_POST['emailjs_private_key']))) {
+                                throw new RuntimeException('Could not save the EmailJS Private Key.');
+                            }
+                        }
                         setSetting('vat_reg_number', isset($_POST['vat_reg_number']) ? trim($_POST['vat_reg_number']) : '');
                         
                         if (isset($_FILES['store_logo']) && $_FILES['store_logo']['error'] === UPLOAD_ERR_OK) {
@@ -78,6 +113,20 @@ case 'settings':
                 $store_contact = getSetting('store_contact', '');
                 $vat_reg_number = getSetting('vat_reg_number', '');
                 $store_logo = getSetting('store_logo', '');
+                $paymongo_secret_key = getSetting('paymongo_secret_key', '');
+                $paymongo_public_key = getSetting('paymongo_public_key', '');
+                $mail_enabled = (bool) getSetting('mail_enabled', false);
+                $smtp_host = getSetting('smtp_host', 'smtp.gmail.com');
+                $smtp_port = getSetting('smtp_port', 587);
+                $smtp_encryption = getSetting('smtp_encryption', 'tls');
+                $smtp_username = getSetting('smtp_username', '');
+                $smtp_password = getSetting('smtp_password', '');
+                $mail_from_name = getSetting('mail_from_name', 'Smart Market POS');
+                $mail_from_address = getSetting('mail_from_address', 'noreply@localhost');
+                $emailjs_service_id = getSetting('emailjs_service_id', '');
+                $emailjs_template_id = getSetting('emailjs_template_id', '');
+                $emailjs_public_key = getSetting('emailjs_public_key', '');
+                $emailjs_private_key_configured = trim((string) getSetting('emailjs_private_key', '')) !== '';
                 ?>
                 
                 <!-- ============================================ -->
@@ -125,7 +174,7 @@ case 'settings':
                 <?php endif; ?>
                 
                 <!-- Settings Form -->
-                <form method="POST" enctype="multipart/form-data" id="settingsForm">
+                <form method="POST" action="?page=settings" enctype="multipart/form-data" id="settingsForm">
                     <input type="hidden" name="save_settings" value="1">
                     
                     <!-- ===== STORE IDENTITY SECTION ===== -->
@@ -209,8 +258,134 @@ case 'settings':
                             
                         </div>
                     </div>
+
+                    <!-- ===== PAYMONGO SECTION ===== -->
+                    <div class="set-section">
+                        <div class="set-section-header">
+                            <div class="set-section-text">
+                                <h3>PayMongo Payments</h3>
+                                <p>Gateway used to pay supplier invoices from the Procurement module</p>
+                            </div>
+                        </div>
+                        <div class="set-section-body">
+                            <div class="set-form-group">
+                                <label class="set-form-label">Secret Key</label>
+                                <input type="text" name="paymongo_secret_key" value="<?php echo htmlspecialchars($paymongo_secret_key); ?>" class="set-form-input" placeholder="sk_test_...">
+                            </div>
+                            <div class="set-form-group">
+                                <label class="set-form-label">Public Key</label>
+                                <input type="text" name="paymongo_public_key" value="<?php echo htmlspecialchars($paymongo_public_key); ?>" class="set-form-input" placeholder="pk_test_...">
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- ===== EMAIL SMTP SECTION ===== -->
+                    <div class="set-section">
+                        <div class="set-section-header">
+                            <div class="set-section-icon" style="background: linear-gradient(135deg, #8B5CF6 0%, #7C3AED 100%);">
+                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                                    <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"></path>
+                                    <path d="M22 6l-10 7L2 6"></path>
+                                </svg>
+                            </div>
+                            <div class="set-section-text">
+                                <h3>Email SMTP</h3>
+                                <p>Used to send procurement and system notifications</p>
+                            </div>
+                        </div>
+                        <div class="set-section-body">
+                            <div class="set-form-group">
+                                <label class="set-form-label">Enable Email Sending</label>
+                                <label class="set-toggle-wrap">
+                                    <input type="checkbox" name="mail_enabled" value="1" <?php echo $mail_enabled ? 'checked' : ''; ?>>
+                                    <span class="set-toggle-slider"></span>
+                                </label>
+                            </div>
+                            <div class="set-form-row">
+                                <div class="set-form-group">
+                                    <label class="set-form-label">SMTP Host</label>
+                                    <input type="text" name="smtp_host" value="<?php echo htmlspecialchars($smtp_host); ?>" class="set-form-input" placeholder="smtp.gmail.com">
+                                </div>
+                                <div class="set-form-group">
+                                    <label class="set-form-label">SMTP Port</label>
+                                    <input type="number" name="smtp_port" value="<?php echo htmlspecialchars((string)$smtp_port); ?>" class="set-form-input" placeholder="587">
+                                </div>
+                            </div>
+                            <div class="set-form-row">
+                                <div class="set-form-group">
+                                    <label class="set-form-label">SMTP Encryption</label>
+                                    <select name="smtp_encryption" class="set-form-input">
+                                        <option value="tls" <?php echo $smtp_encryption === 'tls' ? 'selected' : ''; ?>>TLS</option>
+                                        <option value="ssl" <?php echo $smtp_encryption === 'ssl' ? 'selected' : ''; ?>>SSL</option>
+                                        <option value="" <?php echo $smtp_encryption === '' ? 'selected' : ''; ?>>None</option>
+                                    </select>
+                                </div>
+                                <div class="set-form-group">
+                                    <label class="set-form-label">Sender Name</label>
+                                    <input type="text" name="mail_from_name" value="<?php echo htmlspecialchars($mail_from_name); ?>" class="set-form-input" placeholder="Smart Market POS">
+                                </div>
+                            </div>
+                            <div class="set-form-row">
+                                <div class="set-form-group">
+                                    <label class="set-form-label">SMTP Username</label>
+                                    <input type="text" name="smtp_username" value="<?php echo htmlspecialchars($smtp_username); ?>" class="set-form-input" placeholder="you@example.com">
+                                </div>
+                                <div class="set-form-group">
+                                    <label class="set-form-label">SMTP Password</label>
+                                    <input type="password" name="smtp_password" value="<?php echo htmlspecialchars($smtp_password); ?>" class="set-form-input" placeholder="••••••••">
+                                </div>
+                            </div>
+                            <div class="set-form-group">
+                                <label class="set-form-label">From Email Address</label>
+                                <input type="email" name="mail_from_address" value="<?php echo htmlspecialchars($mail_from_address); ?>" class="set-form-input" placeholder="noreply@yourdomain.com">
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- ===== EMAILJS EMPLOYEE WELCOME EMAILS ===== -->
+                    <div class="set-section">
+                        <div class="set-section-header">
+                            <div class="set-section-icon" style="background: linear-gradient(135deg, #2563EB 0%, #1D4ED8 100%);">
+                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                                    <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"></path>
+                                    <path d="M22 6l-10 7L2 6"></path>
+                                </svg>
+                            </div>
+                            <div class="set-section-text">
+                                <h3>EmailJS Employee Welcome Emails</h3>
+                                <p>Sent when a new employee is added with an email address</p>
+                            </div>
+                        </div>
+                        <div class="set-section-body">
+                            <div class="set-form-row">
+                                <div class="set-form-group">
+                                    <label class="set-form-label">EmailJS Service ID</label>
+                                    <input type="text" name="emailjs_service_id" value="<?php echo htmlspecialchars($emailjs_service_id); ?>" class="set-form-input" placeholder="service_xxxxxxx">
+                                </div>
+                                <div class="set-form-group">
+                                    <label class="set-form-label">EmailJS Template ID</label>
+                                    <input type="text" name="emailjs_template_id" value="<?php echo htmlspecialchars($emailjs_template_id); ?>" class="set-form-input" placeholder="template_xxxxxxx">
+                                </div>
+                            </div>
+                            <div class="set-form-group">
+                                <label class="set-form-label">EmailJS Public Key</label>
+                                <input type="text" name="emailjs_public_key" value="<?php echo htmlspecialchars($emailjs_public_key); ?>" class="set-form-input" placeholder="Your EmailJS public key">
+                            </div>
+                            <div class="set-form-group">
+                                <label class="set-form-label">EmailJS Private Key</label>
+                                <input type="password" name="emailjs_private_key" value="" class="set-form-input" placeholder="<?php echo $emailjs_private_key_configured ? 'Saved — leave blank to keep current key' : 'Your EmailJS private key'; ?>" autocomplete="new-password">
+                                <div class="set-form-hint"><?php echo $emailjs_private_key_configured ? 'A private key is saved. Leave this field blank to keep it.' : 'Required when EmailJS server-side API access uses strict mode.'; ?> Keep this key secret; do not share it.</div>
+                            </div>
+                            <div class="set-form-hint">
+                                Configure your EmailJS template to send to <code>{{to_email}}</code>. Available template values:
+                                <code>{{to_name}}</code>, <code>{{employee_id}}</code>, <code>{{position}}</code>,
+                                <code>{{department}}</code>, and <code>{{start_date}}</code>. This sends onboarding details only,
+                                not an account invitation or password.
+                            </div>
+                        </div>
+                    </div>
                     
-                    <!-- ===== TAX & VAT SECTION ===== -->
+                        <!-- ===== TAX & VAT SECTION ===== -->
                     <div class="set-section">
                         <div class="set-section-header">
                             <div class="set-section-icon" style="background: linear-gradient(135deg, #10B981 0%, #059669 100%);">

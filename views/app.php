@@ -6,6 +6,16 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title><?php echo htmlspecialchars((isLoggedIn() ? getRoleLabel($_SESSION['role']) : 'Login') . ' - ' . $store_name); ?></title>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script>window.CSRF_TOKEN = <?php echo json_encode(csrfToken()); ?>;</script>
+    <script>
+    // Keep the URL clean: hide "?page=..." from the address bar (page is kept in the session)
+    (function(){
+        var q = window.location.search;
+        if (/^\?page=[^&]+$/.test(q) && window.history && window.history.replaceState) {
+            window.history.replaceState({}, '', window.location.pathname);
+        }
+    })();
+    </script>
     <link rel="stylesheet" href="assets/css/app.css">
 </head>
 <body>
@@ -254,6 +264,32 @@
                     </button>
                     
                 </form>
+
+                <?php
+                $openJobs = [];
+                try {
+                    $openJobs = $pdo->query("SELECT id, title, department, location, type, salary_min, salary_max, description, requirements, created_at FROM job_postings WHERE status = 'open' ORDER BY created_at DESC LIMIT 50")->fetchAll(PDO::FETCH_ASSOC);
+                } catch (Exception $e) {
+                    $openJobs = [];
+                }
+                $jobTypeLabels = ['full_time' => 'Full-time', 'part_time' => 'Part-time', 'contract' => 'Contract', 'internship' => 'Internship'];
+                ?>
+                <?php if (!empty($openJobs)): ?>
+                    <!-- Job postings banner -->
+                    <button type="button" class="hiring-banner" onclick="document.getElementById('jobsModal').classList.add('show')">
+                        <span class="hiring-banner-icon">
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <rect x="2" y="7" width="20" height="14" rx="2" ry="2"></rect>
+                                <path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"></path>
+                            </svg>
+                        </span>
+                        <span class="hiring-banner-text">
+                            <strong>We're Hiring!</strong>
+                            <span><?php echo count($openJobs); ?> open position<?php echo count($openJobs) === 1 ? '' : 's'; ?> &mdash; view details</span>
+                        </span>
+                        <span class="hiring-banner-arrow">→</span>
+                    </button>
+                <?php endif; ?>
                 
                 <!-- Footer badges -->
                 <div class="footer-badges">
@@ -391,6 +427,45 @@
             </div>
         </div>
 
+        <?php if (!empty($openJobs)): ?>
+        <div class="modal" id="jobsModal" onclick="if (event.target === this) this.classList.remove('show');">
+            <div class="modal-content jobs-modal-content">
+                <div class="modal-header">
+                    <h2>Open Positions</h2>
+                    <button type="button" class="close" onclick="document.getElementById('jobsModal').classList.remove('show')" title="Close">&times;</button>
+                </div>
+                <?php foreach ($openJobs as $job): ?>
+                    <div class="job-card">
+                        <div class="job-card-head">
+                            <h3><?php echo htmlspecialchars($job['title']); ?></h3>
+                            <span class="job-type-badge"><?php echo htmlspecialchars($jobTypeLabels[$job['type']] ?? $job['type']); ?></span>
+                        </div>
+                        <div class="job-meta">
+                            <?php if (!empty($job['department'])): ?><span>🏢 <?php echo htmlspecialchars($job['department']); ?></span><?php endif; ?>
+                            <?php if (!empty($job['location'])): ?><span>📍 <?php echo htmlspecialchars($job['location']); ?></span><?php endif; ?>
+                            <?php if ($job['salary_min'] !== null || $job['salary_max'] !== null): ?>
+                                <span>💰 <?php
+                                    $min = $job['salary_min'] !== null ? '₱' . number_format((float)$job['salary_min'], 2) : '';
+                                    $max = $job['salary_max'] !== null ? '₱' . number_format((float)$job['salary_max'], 2) : '';
+                                    echo htmlspecialchars($min && $max ? "$min – $max" : ($min ?: $max));
+                                ?></span>
+                            <?php endif; ?>
+                            <span>🗓 Posted <?php echo htmlspecialchars(date('M j, Y', strtotime($job['created_at']))); ?></span>
+                        </div>
+                        <?php if (!empty($job['description'])): ?>
+                            <p class="job-section-label">Description</p>
+                            <p class="job-text"><?php echo nl2br(htmlspecialchars($job['description'])); ?></p>
+                        <?php endif; ?>
+                        <?php if (!empty($job['requirements'])): ?>
+                            <p class="job-section-label">Requirements</p>
+                            <p class="job-text"><?php echo nl2br(htmlspecialchars($job['requirements'])); ?></p>
+                        <?php endif; ?>
+                    </div>
+                <?php endforeach; ?>
+            </div>
+        </div>
+        <?php endif; ?>
+
         <script>
                 function togglePassword() {
                     var passwordInput = document.getElementById('password');
@@ -527,76 +602,81 @@
     
     <div class="nav-label" style="margin-top:1rem;">Management</div>
     
-    <?php if (canAccess('finance_dashboard')): ?>
-    <a href="?page=finance_dashboard" class="<?php echo (isset($_GET['page']) && $_GET['page'] == 'finance_dashboard') ? 'active' : ''; ?>"><svg class="nav-icon"><use href="#nav-finance"></use></svg>Finance</a>
-    <?php endif; ?>
-    <?php if (canAccess('finance_reports')): ?>
-    <a href="?page=finance_reports" class="<?php echo (isset($_GET['page']) && $_GET['page'] == 'finance_reports') ? 'active' : ''; ?>"><svg class="nav-icon"><use href="#nav-reports"></use></svg>Finance Reports</a>
-    <?php endif; ?>
-
-
     <?php if (canAccess('returns') || canAccess('returns_create')): ?>
     <a href="?page=returns" class="<?php echo (isset($_GET['page']) && $_GET['page'] == 'returns') ? 'active' : ''; ?>"><svg class="nav-icon"><use href="#nav-returns"></use></svg>Returns</a>
     <?php endif; ?>
-    
-    <?php if (canAccess('hr') && !isAdmin()): ?>
-        <a href="?page=hr" class="<?php echo (isset($_GET['page']) && $_GET['page'] == 'hr') ? 'active' : ''; ?>"><svg class="nav-icon"><use href="#nav-people"></use></svg>HR</a>
-    <?php endif; ?>
-    
-    <!-- HR Sub-menu items - Always visible for HR-role users -->
-    <!-- HR Sub-menu items - Always visible for HR-role users -->
-    <!-- HR Sub-menu items - Always visible for HR-role users -->
-    <?php if (canAccess('hr') && !isAdmin()): ?>
-    <a href="?page=hr&open=add_employee" style="padding-left: 2.5rem; font-size: 0.85rem;"><svg class="nav-icon"><use href="#nav-add"></use></svg>Add Employee</a>
-    <a href="?page=hr&open=attendance" style="padding-left: 2.5rem; font-size: 0.85rem;"><svg class="nav-icon"><use href="#nav-attendance"></use></svg>Take Attendance</a>
-    <a href="?page=hr&open=leave" style="padding-left: 2.5rem; font-size: 0.85rem;"><svg class="nav-icon"><use href="#nav-leave"></use></svg>Leave Request</a>
-    <a href="?page=hr&open=payroll" style="padding-left: 2.5rem; font-size: 0.85rem;"><svg class="nav-icon"><use href="#nav-payroll"></use></svg>Process Payroll</a>
-    <a href="?page=hr&open=stats" style="padding-left: 2.5rem; font-size: 0.85rem;"><svg class="nav-icon"><use href="#nav-reports"></use></svg>Employee Stats</a>
-    <?php endif; ?>
 
-    <?php if (!isAdmin() && hasRole('hr')): ?>
-    <a href="?page=users&add_role=1" style="padding-left: 2.5rem; font-size: 0.85rem;"><svg class="nav-icon"><use href="#nav-add"></use></svg>Add Role</a>
-    <?php endif; ?>
-    <?php if (!isAdmin() && hasRole('hr')): ?>
-    <a href="?page=users" style="padding-left: 2.5rem; font-size: 0.85rem;"><svg class="nav-icon"><use href="#nav-users"></use></svg>Edit User Roles</a>
-    <?php endif; ?>
-    
-    <?php if (canAccess('products')): ?>
-    <a href="?page=products" class="<?php echo (isset($_GET['page']) && $_GET['page'] == 'products') ? 'active' : ''; ?>"><svg class="nav-icon"><use href="#nav-products"></use></svg>Products</a>
-    <?php endif; ?>
-
-    <?php if (canAccess('stock')): ?>
-    <a href="?page=stock" class="<?php echo (isset($_GET['page']) && $_GET['page'] == 'stock') ? 'active' : ''; ?>"><svg class="nav-icon"><use href="#nav-stock"></use></svg>Stock</a>
-    <?php endif; ?>
-
-    <?php if (canAccess('purchases')): ?>
-    <a href="?page=purchases" class="<?php echo (isset($_GET['page']) && $_GET['page'] == 'purchases') ? 'active' : ''; ?>"><svg class="nav-icon"><use href="#nav-purchases"></use></svg>Purchases</a>
-    <?php endif; ?>
-
+    <?php
+    $sidebarPage = $_GET['page'] ?? 'dashboard';
+    $sidebarInventoryPages = ['products', 'stock', 'purchases', 'suppliers', 'inventory_reports', 'categories', 'archive'];
+    $sidebarHrPages = ['hr', 'job_postings'];
+    if (!isAdmin() && hasRole('hr')) {
+        $sidebarHrPages[] = 'users';
+    }
+    $sidebarFinancePages = ['finance_dashboard', 'finance_reports'];
+    ?>
     <?php if (canAccess('procurement')): ?>
-    <a href="?page=procurement" class="<?php echo (isset($_GET['page']) && $_GET['page'] == 'procurement') ? 'active' : ''; ?>"><svg class="nav-icon"><use href="#nav-purchases"></use></svg>Procurement</a>
+    <details class="sidebar-group" <?php echo $sidebarPage === 'procurement' ? 'open' : ''; ?>>
+        <summary class="<?php echo $sidebarPage === 'procurement' ? 'active' : ''; ?>"><svg class="nav-icon"><use href="#nav-purchases"></use></svg><span>Procurement</span><span class="sidebar-chevron"></span></summary>
+        <div class="sidebar-submenu">
+            <a href="?page=procurement&amp;tab=requisitions" class="<?php echo $sidebarPage === 'procurement' && ($_GET['tab'] ?? 'requisitions') === 'requisitions' ? 'active' : ''; ?>">Requisition &amp; Budget</a>
+            <a href="?page=procurement&amp;tab=rfqs" class="<?php echo $sidebarPage === 'procurement' && ($_GET['tab'] ?? '') === 'rfqs' ? 'active' : ''; ?>">Sourcing / RFQ</a>
+            <a href="?page=procurement&amp;tab=analysis" class="<?php echo $sidebarPage === 'procurement' && ($_GET['tab'] ?? '') === 'analysis' ? 'active' : ''; ?>">Supplier Selection</a>
+            <a href="?page=procurement&amp;tab=orders" class="<?php echo $sidebarPage === 'procurement' && ($_GET['tab'] ?? '') === 'orders' ? 'active' : ''; ?>">Purchase Order</a>
+            <a href="?page=procurement&amp;tab=delivery" class="<?php echo $sidebarPage === 'procurement' && ($_GET['tab'] ?? '') === 'delivery' ? 'active' : ''; ?>">Delivery &amp; Receiving</a>
+            <a href="?page=procurement&amp;tab=invoices" class="<?php echo $sidebarPage === 'procurement' && ($_GET['tab'] ?? '') === 'invoices' ? 'active' : ''; ?>">Invoice Match</a>
+            <a href="?page=procurement&amp;tab=payments" class="<?php echo $sidebarPage === 'procurement' && ($_GET['tab'] ?? '') === 'payments' ? 'active' : ''; ?>">Payment</a>
+            <a href="?page=procurement&amp;tab=ratings" class="<?php echo $sidebarPage === 'procurement' && ($_GET['tab'] ?? '') === 'ratings' ? 'active' : ''; ?>">Close &amp; Review</a>
+        </div>
+    </details>
     <?php endif; ?>
 
-    <?php if (canAccess('suppliers')): ?>
-    <a href="?page=suppliers" class="<?php echo (isset($_GET['page']) && $_GET['page'] == 'suppliers') ? 'active' : ''; ?>"><svg class="nav-icon"><use href="#nav-suppliers"></use></svg>Suppliers</a>
+    <?php if (canAccess('products') || canAccess('stock') || canAccess('purchases') || canAccess('suppliers') || canAccess('inventory_reports') || canAccess('categories') || canAccess('archive')): ?>
+    <details class="sidebar-group" <?php echo in_array($sidebarPage, $sidebarInventoryPages, true) ? 'open' : ''; ?>>
+        <summary class="<?php echo in_array($sidebarPage, $sidebarInventoryPages, true) ? 'active' : ''; ?>"><svg class="nav-icon"><use href="#nav-stock"></use></svg><span>Inventory</span><span class="sidebar-chevron"></span></summary>
+        <div class="sidebar-submenu">
+            <?php if (canAccess('products')): ?><a href="?page=products" class="<?php echo $sidebarPage === 'products' ? 'active' : ''; ?>">Products</a><?php endif; ?>
+            <?php if (canAccess('stock')): ?><a href="?page=stock" class="<?php echo $sidebarPage === 'stock' ? 'active' : ''; ?>">Stock</a><?php endif; ?>
+            <?php if (canAccess('purchases')): ?><a href="?page=purchases" class="<?php echo $sidebarPage === 'purchases' ? 'active' : ''; ?>">Purchases</a><?php endif; ?>
+            <?php if (canAccess('suppliers')): ?><a href="?page=suppliers" class="<?php echo $sidebarPage === 'suppliers' ? 'active' : ''; ?>">Suppliers</a><?php endif; ?>
+            <?php if (canAccess('inventory_reports')): ?><a href="?page=inventory_reports" class="<?php echo $sidebarPage === 'inventory_reports' ? 'active' : ''; ?>">Inventory Reports</a><?php endif; ?>
+            <?php if (canAccess('categories')): ?><a href="?page=categories" class="<?php echo $sidebarPage === 'categories' ? 'active' : ''; ?>">Categories</a><?php endif; ?>
+            <?php if (canAccess('archive')): ?><a href="?page=archive" class="<?php echo $sidebarPage === 'archive' ? 'active' : ''; ?>">Archive</a><?php endif; ?>
+        </div>
+    </details>
+    <?php endif; ?>
+
+    <?php if (canAccess('hr')): ?>
+    <details class="sidebar-group" <?php echo in_array($sidebarPage, $sidebarHrPages, true) ? 'open' : ''; ?>>
+        <summary class="<?php echo in_array($sidebarPage, $sidebarHrPages, true) ? 'active' : ''; ?>"><svg class="nav-icon"><use href="#nav-people"></use></svg><span>HR</span><span class="sidebar-chevron"></span></summary>
+        <div class="sidebar-submenu">
+            <a href="?page=hr" class="<?php echo $sidebarPage === 'hr' && empty($_GET['open']) ? 'active' : ''; ?>">HR Dashboard</a>
+            <a href="?page=hr&amp;open=add_employee">Add Employee</a>
+            <a href="?page=hr&amp;open=attendance">Take Attendance</a>
+            <a href="?page=hr&amp;open=leave">Leave Request</a>
+            <a href="?page=hr#payroll">Payroll Overview</a>
+            <a href="?page=hr&amp;open=stats">Employee Stats</a>
+            <?php if (canAccess('users') && !isAdmin()): ?><a href="?page=users&amp;add_role=1" class="<?php echo $sidebarPage === 'users' && isset($_GET['add_role']) ? 'active' : ''; ?>">Add Role</a><a href="?page=users" class="<?php echo $sidebarPage === 'users' && !isset($_GET['manage_roles']) ? 'active' : ''; ?>">Edit User Roles</a><?php endif; ?>
+            <?php if (canAccess('hr')): ?><a href="?page=job_postings" class="<?php echo $sidebarPage === 'job_postings' ? 'active' : ''; ?>">Job Postings</a><?php endif; ?>
+        </div>
+    </details>
+    <?php endif; ?>
+
+    <?php if (canAccess('finance_dashboard') || canAccess('finance_reports')): ?>
+    <?php $sidebarFinanceOpen = in_array($sidebarPage, $sidebarFinancePages, true); ?>
+    <details class="sidebar-group" <?php echo $sidebarFinanceOpen ? 'open' : ''; ?>>
+        <summary class="<?php echo in_array($sidebarPage, $sidebarFinancePages, true) ? 'active' : ''; ?>"><svg class="nav-icon"><use href="#nav-finance"></use></svg><span>Finance</span><span class="sidebar-chevron"></span></summary>
+        <div class="sidebar-submenu">
+            <?php if (canAccess('finance_dashboard')): ?><a href="?page=finance_dashboard" class="<?php echo $sidebarPage === 'finance_dashboard' ? 'active' : ''; ?>">Finance Dashboard</a><?php endif; ?>
+            <?php if (canAccess('finance_reports')): ?><a href="?page=finance_reports" class="<?php echo $sidebarPage === 'finance_reports' ? 'active' : ''; ?>">Finance Reports</a><?php endif; ?>
+        </div>
+    </details>
     <?php endif; ?>
 
     <?php if (canAccess('tokenization')): ?>
     <a href="?page=tokenization" class="<?php echo (isset($_GET['page']) && $_GET['page'] == 'tokenization') ? 'active' : ''; ?>"><svg class="nav-icon"><use href="#nav-finance"></use></svg>Card Tokens</a>
     <?php endif; ?>
 
-    <?php if (canAccess('inventory_reports')): ?>
-    <a href="?page=inventory_reports" class="<?php echo (isset($_GET['page']) && $_GET['page'] == 'inventory_reports') ? 'active' : ''; ?>"><svg class="nav-icon"><use href="#nav-reports"></use></svg>Inventory Reports</a>
-    <?php endif; ?>
-    
-    <?php if (canAccess('categories')): ?>
-    <a href="?page=categories" class="<?php echo (isset($_GET['page']) && $_GET['page'] == 'categories') ? 'active' : ''; ?>"><svg class="nav-icon"><use href="#nav-categories"></use></svg>Categories</a>
-    <?php endif; ?>
-    
-    <?php if (canAccess('archive')): ?>
-    <a href="?page=archive" class="<?php echo (isset($_GET['page']) && $_GET['page'] == 'archive') ? 'active' : ''; ?>"><svg class="nav-icon"><use href="#nav-archive"></use></svg>Archive</a>
-    <?php endif; ?>
-    
     <?php if (canAccess('customers')): ?>
     <a href="?page=customers" class="<?php echo (isset($_GET['page']) && $_GET['page'] == 'customers') ? 'active' : ''; ?>"><svg class="nav-icon"><use href="#nav-customers"></use></svg>Customers</a>
     <?php endif; ?>

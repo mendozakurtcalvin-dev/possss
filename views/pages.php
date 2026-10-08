@@ -1,5 +1,9 @@
 <?php
-$page = isset($_GET['page']) ? $_GET['page'] : 'dashboard';
+$page = isset($_GET['page']) ? $_GET['page'] : ($_SESSION['current_page'] ?? 'dashboard');
+// Remember the current page so the URL can stay clean (without ?page=...)
+if (isset($_GET['page'])) {
+    $_SESSION['current_page'] = $page;
+}
 switch ($page):
 case 'dashboard':
     require __DIR__ . '/pages/dashboard.php';
@@ -9,6 +13,9 @@ case 'cart':
     break;
 case 'products':
     require __DIR__ . '/pages/products.php';
+    break;
+case 'job_postings':
+    require __DIR__ . '/pages/job_postings.php';
     break;
 case 'hr':
     require __DIR__ . '/pages/hr.php';

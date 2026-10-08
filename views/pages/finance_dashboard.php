@@ -4,7 +4,7 @@ case 'finance_dashboard':
 
         if (!canAccess('finance')) {
             echo '<div class="alert alert-danger" style="margin:2rem;text-align:center;">
-                <div style="font-size:4rem;margin-bottom:1rem;">⛔</div>
+                <div style="font-size:4rem;margin-bottom:1rem;"></div>
                 <h2>Access Denied</h2>
                 <p>You do not have permission to access this page.</p>
                 <a href="?page=dashboard" class="btn btn-primary" style="margin-top:1rem;">Go to Dashboard</a>
@@ -25,7 +25,7 @@ case 'finance_dashboard':
         <div class="fin-page-header">
             <div>
                 <h2 class="fin-page-title">
-                    <span class="fin-page-icon">💰</span>
+                    <span class="fin-page-icon"></span>
                     Finance Dashboard
                 </h2>
                 <p class="fin-page-subtitle">Real-time revenue and financial analytics</p>
@@ -215,7 +215,7 @@ case 'finance_dashboard':
                         <div class="fin-customer-avatar"><?php echo strtoupper(substr($c['name'], 0, 1)); ?></div>
                         <div class="fin-customer-info">
                             <div class="fin-customer-name"><?php echo htmlspecialchars($c['name']); ?></div>
-                            <div class="fin-customer-meta"><?php echo (int)$c['orders']; ?> orders · ⭐ <?php echo (int)($c['loyalty_points'] ?? 0); ?> pts</div>
+                            <div class="fin-customer-meta"><?php echo (int)$c['orders']; ?> orders ·  <?php echo (int)($c['loyalty_points'] ?? 0); ?> pts</div>
                         </div>
                         <div class="fin-customer-amount">
                             <div class="fin-customer-amount-value">₱<?php echo number_format($c['total_spent'], 2); ?></div>
@@ -229,7 +229,7 @@ case 'finance_dashboard':
                 </div>
                 <?php else: ?>
                 <div class="fin-empty">
-                    <div class="fin-empty-icon">👥</div>
+                    <div class="fin-empty-icon"></div>
                     <div class="fin-empty-title">No customer data yet</div>
                     <div class="fin-empty-text">Customer spending will appear here</div>
                 </div>
