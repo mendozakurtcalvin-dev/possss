@@ -143,7 +143,7 @@ function getRolePermissionOptions() {
         'purchases_view' => 'View purchases', 'suppliers' => 'Suppliers',
         'suppliers_create' => 'Create suppliers', 'suppliers_edit' => 'Edit suppliers',
         'inventory_reports' => 'Inventory reports', 'procurement' => 'Procurement',
-        'procurement_manage' => 'Manage procurement'
+        'procurement_manage' => 'Manage procurement', 'procurement_approve' => 'Approve purchase requests'
     ];
 }
 
@@ -345,6 +345,159 @@ function ensureProcurementTables() {
         KEY idx_product_evaluation_product (product_id),
         KEY idx_product_evaluation_supplier (supplier_id)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+
+    // ============================================
+    // PURCHASE REQUEST WORKFLOW (multi-product)
+    // ============================================
+    $pdo->exec("CREATE TABLE IF NOT EXISTS purchase_requests (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        request_number VARCHAR(50) NOT NULL,
+        supplier_id INT DEFAULT NULL,
+        request_date DATE NOT NULL,
+        requester_id INT DEFAULT NULL,
+        department VARCHAR(100) DEFAULT NULL,
+        reason TEXT NOT NULL,
+        remarks TEXT DEFAULT NULL,
+        attachment_path VARCHAR(255) DEFAULT NULL,
+        status ENUM('draft','pending_approval','revision_requested','approved','rejected','cancelled') NOT NULL DEFAULT 'draft',
+        subtotal DECIMAL(12,2) NOT NULL DEFAULT 0.00,
+        grand_total DECIMAL(12,2) NOT NULL DEFAULT 0.00,
+        over_limit TINYINT(1) NOT NULL DEFAULT 0,
+        duplicate_flag TINYINT(1) NOT NULL DEFAULT 0,
+        duplicate_notes TEXT DEFAULT NULL,
+        admin_comment TEXT DEFAULT NULL,
+        decided_by INT DEFAULT NULL,
+        decided_at DATETIME DEFAULT NULL,
+        submitted_at DATETIME DEFAULT NULL,
+        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP NULL DEFAULT NULL ON UPDATE CURRENT_TIMESTAMP,
+        UNIQUE KEY uniq_purchase_request_number (request_number),
+        KEY idx_purchase_requests_status (status),
+        KEY idx_purchase_requests_requester (requester_id),
+        KEY idx_purchase_requests_supplier (supplier_id),
+        KEY idx_purchase_requests_created (created_at)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+
+    $pdo->exec("CREATE TABLE IF NOT EXISTS purchase_request_items (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        request_id INT NOT NULL,
+        product_id INT DEFAULT NULL,
+        item_name VARCHAR(255) NOT NULL,
+        unit VARCHAR(30) DEFAULT 'pc',
+        quantity INT NOT NULL DEFAULT 1,
+        estimated_unit_price DECIMAL(12,2) NOT NULL DEFAULT 0.00,
+        line_total DECIMAL(12,2) NOT NULL DEFAULT 0.00,
+        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        KEY idx_pr_items_request (request_id),
+        KEY idx_pr_items_product (product_id)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+
+    $pdo->exec("CREATE TABLE IF NOT EXISTS procurement_approval_logs (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        request_id INT NOT NULL,
+        action VARCHAR(30) NOT NULL,
+        previous_status VARCHAR(30) DEFAULT NULL,
+        new_status VARCHAR(30) DEFAULT NULL,
+        actor_id INT DEFAULT NULL,
+        actor_role VARCHAR(50) DEFAULT NULL,
+        comments TEXT DEFAULT NULL,
+        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        KEY idx_approval_logs_request (request_id),
+        KEY idx_approval_logs_created (created_at)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+
+    // Goods receipt line items (accepted / damaged / missing quantities per delivery)
+    $pdo->exec("CREATE TABLE IF NOT EXISTS procurement_grn_items (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        grn_id INT NOT NULL,
+        po_item_id INT NOT NULL,
+        product_id INT DEFAULT NULL,
+        item_name VARCHAR(255) NOT NULL,
+        ordered_qty INT NOT NULL DEFAULT 0,
+        previously_received INT NOT NULL DEFAULT 0,
+        delivered_qty INT NOT NULL DEFAULT 0,
+        accepted_qty INT NOT NULL DEFAULT 0,
+        damaged_qty INT NOT NULL DEFAULT 0,
+        missing_qty INT NOT NULL DEFAULT 0,
+        batch_number VARCHAR(100) DEFAULT NULL,
+        expiry_date DATE DEFAULT NULL,
+        remarks VARCHAR(255) DEFAULT NULL,
+        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        KEY idx_grn_items_grn (grn_id),
+        KEY idx_grn_items_po_item (po_item_id)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+
+    // ============================================
+    // COLUMN MIGRATIONS FOR EXISTING TABLES
+    // ============================================
+    $procurementColumnMigrations = [
+        'procurement_grns' => [
+            'delivery_reference' => 'VARCHAR(100) DEFAULT NULL',
+            'invoice_reference' => 'VARCHAR(100) DEFAULT NULL',
+            'remarks' => 'TEXT DEFAULT NULL',
+            'client_token' => 'VARCHAR(64) DEFAULT NULL',
+        ],
+        'procurement_purchase_orders' => [
+            'purchase_request_id' => 'INT DEFAULT NULL',
+            'ordered_at' => 'DATETIME DEFAULT NULL',
+            'issued_by' => 'INT DEFAULT NULL',
+        ],
+        'procurement_invoices' => [
+            'paid_amount' => 'DECIMAL(12,2) NOT NULL DEFAULT 0.00',
+            'created_by' => 'INT DEFAULT NULL',
+        ],
+        'procurement_payments' => [
+            'payment_date' => 'DATE DEFAULT NULL',
+            'created_by' => 'INT DEFAULT NULL',
+        ],
+    ];
+    foreach ($procurementColumnMigrations as $table => $columns) {
+        foreach ($columns as $column => $definition) {
+            $check = $pdo->prepare(
+                'SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ?'
+            );
+            $check->execute([$table, $column]);
+            if (!(int) $check->fetchColumn()) {
+                try { $pdo->exec("ALTER TABLE `$table` ADD COLUMN `$column` $definition"); } catch (PDOException $e) {}
+            }
+        }
+    }
+    // Unique token so a double-submitted receipt can never post twice
+    try {
+        $check = $pdo->prepare(
+            'SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ?'
+        );
+        $check->execute(['procurement_grns', 'client_token']);
+        if ((int) $check->fetchColumn()) {
+            $pdo->exec("ALTER TABLE procurement_grns ADD UNIQUE KEY uniq_grn_client_token (client_token)");
+        }
+    } catch (PDOException $e) {}
+    // Link a purchase order back to the approved purchase request
+    try {
+        $check = $pdo->prepare(
+            'SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ?'
+        );
+        $check->execute(['procurement_purchase_orders', 'purchase_request_id']);
+        if ((int) $check->fetchColumn()) {
+            $pdo->exec("ALTER TABLE procurement_purchase_orders ADD KEY idx_po_purchase_request (purchase_request_id)");
+        }
+    } catch (PDOException $e) {}
+    // Support partially paid invoices
+    try {
+        $paymentStatusCheck = $pdo->prepare(
+            "SELECT COLUMN_TYPE FROM information_schema.COLUMNS
+             WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'procurement_invoices' AND COLUMN_NAME = 'payment_status'"
+        );
+        $paymentStatusCheck->execute();
+        $paymentStatusType = (string) $paymentStatusCheck->fetchColumn();
+        if ($paymentStatusType !== '' && strpos($paymentStatusType, "'partial'") === false) {
+            $pdo->exec("ALTER TABLE procurement_invoices MODIFY payment_status ENUM('unpaid','partial','paid','void') NOT NULL DEFAULT 'unpaid'");
+        }
+    } catch (PDOException $e) {}
+    // Guard against duplicate payment records for the same invoice + reference
+    try {
+        $pdo->exec("ALTER TABLE procurement_payments ADD UNIQUE KEY uniq_invoice_reference (invoice_id, reference)");
+    } catch (PDOException $e) {}
 }
 
 try {
@@ -662,7 +815,7 @@ function hasPermission($permission) {
         'purchases', 'purchases_create', 'purchases_view',
         'suppliers', 'suppliers_create', 'suppliers_edit',
         'inventory_reports',
-        'procurement', 'procurement_manage',
+        'procurement', 'procurement_manage', 'procurement_approve',
         'tokenization'
     ],
     'cashier' => [
@@ -798,6 +951,25 @@ function notifyInventory($type, $title, $message, $product_id = null, $reference
         return $stmt->execute([$type, $title, $message, $product_id, $reference_id, $user_id, $username]);
     } catch (PDOException $e) {
         error_log("notifyInventory error: " . $e->getMessage());
+        return false;
+    }
+}
+
+// Always records a procurement workflow notification (used to alert admins about
+// submitted purchase requests and requesters about approval decisions).
+function notifyProcurement($title, $message, $referenceId = null, $productId = null) {
+    global $pdo;
+    try {
+        $user_id = $_SESSION['user_id'] ?? null;
+        $username = $_SESSION['full_name'] ?? $_SESSION['username'] ?? 'System';
+        $stmt = $pdo->prepare("
+            INSERT INTO inventory_notifications 
+            (type, title, message, product_id, reference_id, triggered_by, triggered_by_name) 
+            VALUES ('procurement', ?, ?, ?, ?, ?, ?)
+        ");
+        return $stmt->execute([$title, $message, $productId, $referenceId, $user_id, $username]);
+    } catch (PDOException $e) {
+        error_log("notifyProcurement error: " . $e->getMessage());
         return false;
     }
 }

@@ -65,6 +65,24 @@ case 'suppliers':
 case 'procurement':
     require __DIR__ . '/pages/procurement.php';
     break;
+case 'proc_dashboard':
+    require __DIR__ . '/pages/procurement_dashboard.php';
+    break;
+case 'purchase_requests':
+    require __DIR__ . '/pages/purchase_requests.php';
+    break;
+case 'purchase_orders':
+    require __DIR__ . '/pages/purchase_orders.php';
+    break;
+case 'receive_deliveries':
+    require __DIR__ . '/pages/receive_deliveries.php';
+    break;
+case 'proc_history':
+    require __DIR__ . '/pages/proc_history.php';
+    break;
+case 'proc_approvals':
+    require __DIR__ . '/pages/proc_approvals.php';
+    break;
 case 'tokenization':
     require __DIR__ . '/pages/tokenization.php';
     break;

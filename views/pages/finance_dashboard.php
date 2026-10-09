@@ -479,6 +479,192 @@ case 'finance_dashboard':
         </script>
         
         <?php
+        // PROCUREMENT PAYABLES (supplier invoices & payments)
+        require_once __DIR__ . '/proc_common.php';
+        $payablesOutstanding = 0;
+        $openInvoiceCount = 0;
+        $awaitingInvoiceCount = 0;
+        $openInvoices = [];
+        $recentSupplierPayments = [];
+        try {
+            $payablesOutstanding = floatval($pdo->query("SELECT COALESCE(SUM(amount - paid_amount), 0) FROM procurement_invoices WHERE payment_status IN ('unpaid','partial')")->fetchColumn());
+            $openInvoiceCount = (int) $pdo->query("SELECT COUNT(*) FROM procurement_invoices WHERE payment_status IN ('unpaid','partial')")->fetchColumn();
+            $awaitingInvoiceCount = (int) $pdo->query("
+                SELECT COUNT(*) FROM procurement_purchase_orders po
+                WHERE po.status IN ('received','closed','delivered')
+                  AND NOT EXISTS (SELECT 1 FROM procurement_invoices i WHERE i.po_id = po.id)
+            ")->fetchColumn();
+            $openInvoices = $pdo->query("
+                SELECT i.*, po.po_number, s.name AS supplier_name
+                FROM procurement_invoices i
+                LEFT JOIN procurement_purchase_orders po ON i.po_id = po.id
+                LEFT JOIN suppliers s ON i.supplier_id = s.id
+                WHERE i.payment_status IN ('unpaid','partial')
+                ORDER BY i.created_at DESC
+                LIMIT 10
+            ")->fetchAll();
+            $recentSupplierPayments = $pdo->query("
+                SELECT p.*, i.invoice_number, s.name AS supplier_name
+                FROM procurement_payments p
+                JOIN procurement_invoices i ON i.id = p.invoice_id
+                LEFT JOIN suppliers s ON i.supplier_id = s.id
+                ORDER BY COALESCE(p.payment_date, p.created_at) DESC, p.id DESC
+                LIMIT 6
+            ")->fetchAll();
+        } catch (Exception $e) {
+            error_log('Finance payables load failed: ' . $e->getMessage());
+        }
+        ?>
+        <div style="margin-top:26px;">
+            <div class="fin-page-header" style="margin-bottom:14px;">
+                <div>
+                    <h2 class="fin-page-title" style="font-size:20px;">&#128176; Procurement Payables</h2>
+                    <p class="fin-page-subtitle">Supplier invoices, outstanding balances and payments recorded by Finance</p>
+                </div>
+            </div>
+
+            <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:14px;margin-bottom:18px;">
+                <div class="fin-stat-card">
+                    <div class="fin-stat-header"><div class="fin-stat-icon" style="background:linear-gradient(135deg,#EF4444,#DC2626);">&#9888;</div></div>
+                    <div class="fin-stat-label">Outstanding Payables</div>
+                    <div class="fin-stat-value">&#8369;<?php echo number_format($payablesOutstanding, 2); ?></div>
+                </div>
+                <div class="fin-stat-card">
+                    <div class="fin-stat-header"><div class="fin-stat-icon" style="background:linear-gradient(135deg,#F59E0B,#D97706);">&#128221;</div></div>
+                    <div class="fin-stat-label">Unpaid / Partial Invoices</div>
+                    <div class="fin-stat-value"><?php echo number_format($openInvoiceCount); ?></div>
+                </div>
+                <div class="fin-stat-card">
+                    <div class="fin-stat-header"><div class="fin-stat-icon" style="background:linear-gradient(135deg,#0EA5E9,#0284C7);">&#128230;</div></div>
+                    <div class="fin-stat-label">Received POs Awaiting Invoice</div>
+                    <div class="fin-stat-value"><?php echo number_format($awaitingInvoiceCount); ?></div>
+                </div>
+            </div>
+
+            <div class="fin-card" style="margin-bottom:18px;">
+                <div class="fin-card-header">
+                    <div class="fin-card-title-wrap">
+                        <div class="fin-card-title">&#128221; Open Supplier Invoices</div>
+                        <div class="fin-card-subtitle">Record payments — partial payments are supported</div>
+                    </div>
+                </div>
+                <?php if (count($openInvoices) === 0): ?>
+                <div class="fin-empty"><div class="fin-empty-icon">&#128269;</div><div class="fin-empty-title">No open supplier invoices</div></div>
+                <?php else: ?>
+                <div class="fin-table-wrap">
+                    <table class="fin-table">
+                        <thead><tr><th>Invoice #</th><th>PO</th><th>Supplier</th><th>Amount</th><th>Paid</th><th>Outstanding</th><th>Status</th><th style="text-align:right;">Actions</th></tr></thead>
+                        <tbody>
+                            <?php foreach ($openInvoices as $oi): $oiOutstanding = floatval($oi['amount']) - floatval($oi['paid_amount']); ?>
+                            <tr>
+                                <td><strong><?php echo htmlspecialchars($oi['invoice_number']); ?></strong></td>
+                                <td><?php echo htmlspecialchars($oi['po_number'] ?? '—'); ?></td>
+                                <td><?php echo htmlspecialchars($oi['supplier_name'] ?? '—'); ?></td>
+                                <td>&#8369;<?php echo number_format($oi['amount'], 2); ?></td>
+                                <td>&#8369;<?php echo number_format($oi['paid_amount'], 2); ?></td>
+                                <td><strong>&#8369;<?php echo number_format(max(0, $oiOutstanding), 2); ?></strong></td>
+                                <td><?php echo procPaymentBadge($oi['payment_status']); ?></td>
+                                <td style="text-align:right;">
+                                    <button type="button" class="fin-btn-primary" style="padding:6px 12px;font-size:12px;" onclick="openSupplierPayment(<?php echo (int) $oi['id']; ?>, '<?php echo htmlspecialchars($oi['invoice_number'], ENT_QUOTES); ?>', <?php echo max(0, $oiOutstanding); ?>)">Record Payment</button>
+                                </td>
+                            </tr>
+                            <?php endforeach; ?>
+                        </tbody>
+                    </table>
+                </div>
+                <?php endif; ?>
+            </div>
+            <div class="fin-card">
+                <div class="fin-card-header">
+                    <div class="fin-card-title-wrap">
+                        <div class="fin-card-title">&#128176; Recent Supplier Payments</div>
+                        <div class="fin-card-subtitle">Latest payment records</div>
+                    </div>
+                </div>
+                <?php if (count($recentSupplierPayments) === 0): ?>
+                <div class="fin-empty"><div class="fin-empty-icon">&#128269;</div><div class="fin-empty-title">No supplier payments recorded yet</div></div>
+                <?php else: ?>
+                <div class="fin-table-wrap">
+                    <table class="fin-table">
+                        <thead><tr><th>Date</th><th>Invoice #</th><th>Supplier</th><th>Method</th><th>Reference</th><th>Amount</th><th>Status</th></tr></thead>
+                        <tbody>
+                            <?php foreach ($recentSupplierPayments as $rsp): ?>
+                            <tr>
+                                <td><?php echo htmlspecialchars($rsp['payment_date'] ?? date('Y-m-d', strtotime($rsp['created_at']))); ?></td>
+                                <td><strong><?php echo htmlspecialchars($rsp['invoice_number']); ?></strong></td>
+                                <td><?php echo htmlspecialchars($rsp['supplier_name'] ?? '—'); ?></td>
+                                <td><?php echo htmlspecialchars(str_replace('_', ' ', $rsp['provider'])); ?></td>
+                                <td><?php echo htmlspecialchars($rsp['reference'] ?? '—'); ?></td>
+                                <td>&#8369;<?php echo number_format($rsp['amount'], 2); ?></td>
+                                <td><span class="badge <?php echo $rsp['status'] === 'paid' ? 'badge-success' : ($rsp['status'] === 'failed' ? 'badge-danger' : 'badge-warning'); ?>"><?php echo htmlspecialchars(ucfirst($rsp['status'])); ?></span></td>
+                            </tr>
+                            <?php endforeach; ?>
+                        </tbody>
+                    </table>
+                </div>
+                <?php endif; ?>
+            </div>
+        </div>
+
+        <div id="supplierPaymentModal" class="inv-modal" style="display:none;">
+            <div class="inv-modal-content" style="max-width:480px;">
+                <h3>Record Supplier Payment</h3>
+                <p style="font-size:13px;color:#6b7280;" id="spInvoiceLabel"></p>
+                <form id="supplierPaymentForm">
+                    <input type="hidden" name="invoice_id" id="spInvoiceId">
+                    <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars(csrfToken()); ?>">
+                    <label>Payment Amount *</label>
+                    <input type="number" name="amount" id="spAmount" step="0.01" min="0.01" required style="width:100%;">
+                    <label>Payment Method</label>
+                    <select name="method" style="width:100%;">
+                        <option value="bank_transfer">Bank Transfer</option>
+                        <option value="check">Check</option>
+                        <option value="cash">Cash</option>
+                        <option value="gcash">GCash</option>
+                        <option value="card">Card</option>
+                    </select>
+                    <label>Payment Date</label>
+                    <input type="date" name="payment_date" value="<?php echo date('Y-m-d'); ?>" style="width:100%;">
+                    <label>Reference / Check #</label>
+                    <input name="reference" style="width:100%;" placeholder="Optional but recommended">
+                    <p style="font-size:12px;color:#6b7280;margin-top:8px;">Partial payments are allowed. The invoice stays <strong>Partially Paid</strong> until the balance clears. Duplicate references are rejected.</p>
+                    <div style="margin-top:1rem;display:flex;gap:8px;">
+                        <button type="submit" class="fin-btn-primary">Record Payment</button>
+                        <button type="button" class="inv-btn-cancel" onclick="closeModal('supplierPaymentModal')">Cancel</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+
+        <script>
+        function openSupplierPayment(invoiceId, invoiceNumber, outstanding) {
+            document.getElementById('spInvoiceId').value = invoiceId;
+            document.getElementById('spInvoiceLabel').textContent = 'Invoice ' + invoiceNumber + ' — outstanding balance ₱' + Number(outstanding).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+            var amountInput = document.getElementById('spAmount');
+            amountInput.value = Number(outstanding).toFixed(2);
+            amountInput.max = Number(outstanding).toFixed(2);
+            document.getElementById('supplierPaymentModal').style.display = 'flex';
+        }
+        document.getElementById('supplierPaymentForm').addEventListener('submit', function (e) {
+            e.preventDefault();
+            var fd = new FormData(this);
+            fetch('?action=record_supplier_payment', { method: 'POST', body: fd })
+                .then(function (r) { return r.json(); })
+                .then(function (d) {
+                    if (d.success) {
+                        closeModal('supplierPaymentModal');
+                        showToast('success', 'Payment recorded', 'Status: ' + String(d.payment_status).replace(/_/g, ' ') + '. Outstanding: ₱' + Number(d.outstanding).toLocaleString('en-PH', { minimumFractionDigits: 2 }));
+                        setTimeout(function () { window.location.reload(); }, 1000);
+                    } else {
+                        showToast('error', 'Payment not recorded', d.message || '');
+                    }
+                })
+                .catch(function () { showToast('error', 'Connection error', 'Please try again.'); });
+        });
+        </script>
+
+
+        <?php
         
 
             // ============================================

@@ -2,7 +2,7 @@
 switch ('notifications'):
 case 'notifications':
 
-                                if (!hasRole('inventory')) {
+                                if (!hasRole('inventory') && !isAdmin()) {
                                     echo '<div class="alert alert-danger">⛔ Access Denied</div>';
                                     break;
                                 }

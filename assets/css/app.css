@@ -17200,3 +17200,25 @@ body {
     justify-content: center;
     gap: 8px;
 }
+
+/* ============================================ */
+/* PROCUREMENT MODULE                           */
+/* ============================================ */
+.proc-pagination { display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; padding:12px 4px 0; }
+.proc-pagination-info { color:#6b7280; font-size:12.5px; font-weight:600; }
+.proc-pagination-links { display:flex; gap:6px; flex-wrap:wrap; }
+.proc-pagination-links a { display:inline-flex; align-items:center; justify-content:center; min-width:32px; height:32px; padding:0 10px; border:1px solid #e5e7eb; border-radius:8px; background:#fff; color:#374151; font-size:13px; font-weight:600; text-decoration:none; transition:all .15s ease; }
+.proc-pagination-links a:hover { border-color:#2563eb; color:#2563eb; }
+.proc-pagination-links a.active { background:#2563eb; border-color:#2563eb; color:#fff; }
+.proc-flag { display:inline-flex; align-items:center; gap:5px; padding:3px 9px; border-radius:999px; font-size:11px; font-weight:700; letter-spacing:.02em; }
+.proc-flag-warn { background:#FEF3C7; color:#B45309; }
+.proc-flag-danger { background:#FEE2E2; color:#B91C1C; }
+.proc-loading { display:flex; align-items:center; justify-content:center; gap:10px; padding:34px; color:#6b7280; font-size:13px; font-weight:600; }
+.proc-loading-spinner { width:20px; height:20px; border:3px solid #e5e7eb; border-top-color:#2563eb; border-radius:50%; animation:procSpin .8s linear infinite; }
+@keyframes procSpin { to { transform: rotate(360deg); } }
+
+/* Nested procurement submenu inside the Inventory sidebar group */
+.sidebar-nav .sidebar-group.sidebar-subgroup > summary { padding-left: 26px !important; font-size: 13.5px !important; }
+.sidebar-nav .sidebar-group.sidebar-subgroup > summary .sidebar-chevron { margin-right: 4px; }
+.sidebar-nav .sidebar-group.sidebar-subgroup > .sidebar-submenu { padding-left: 14px; }
+.sidebar-nav .sidebar-group.sidebar-subgroup > .sidebar-submenu a { padding-left: 16px !important; }

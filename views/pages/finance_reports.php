@@ -242,6 +242,9 @@ case 'finance_reports':
                         <a href="?page=finance_reports&type=payment&period=<?php echo $period; ?>" class="fin-tab <?php echo $report_type == 'payment' ? 'active' : ''; ?>">
                              Payments
                         </a>
+                        <a href="?page=finance_reports&type=procurement&period=<?php echo $period; ?>" class="fin-tab <?php echo $report_type == 'procurement' ? 'active' : ''; ?>">
+                             Procurement
+                        </a>
                     </div>
                     
                     <!-- Period Filter Bar -->
@@ -805,6 +808,132 @@ case 'finance_reports':
                             <?php endif; ?>
                         </div>
                     
+                    <?php elseif ($report_type == 'procurement'): ?>
+
+                        <?php
+                        // Supplier invoices & payments within the selected period
+                        $procInvoiceStmt = $pdo->prepare("
+                            SELECT i.*, po.po_number, s.name AS supplier_name
+                            FROM procurement_invoices i
+                            LEFT JOIN procurement_purchase_orders po ON i.po_id = po.id
+                            LEFT JOIN suppliers s ON i.supplier_id = s.id
+                            WHERE COALESCE(i.invoice_date, DATE(i.created_at)) BETWEEN ? AND ?
+                            ORDER BY i.created_at DESC
+                        ");
+                        $procInvoiceStmt->execute([$start_date, $end_date]);
+                        $procInvoices = $procInvoiceStmt->fetchAll();
+
+                        $procPayStmt = $pdo->prepare("
+                            SELECT p.*, i.invoice_number, s.name AS supplier_name
+                            FROM procurement_payments p
+                            JOIN procurement_invoices i ON i.id = p.invoice_id
+                            LEFT JOIN suppliers s ON i.supplier_id = s.id
+                            WHERE DATE(COALESCE(p.payment_date, p.created_at)) BETWEEN ? AND ?
+                            ORDER BY COALESCE(p.payment_date, p.created_at) DESC
+                        ");
+                        $procPayStmt->execute([$start_date, $end_date]);
+                        $procPayments = $procPayStmt->fetchAll();
+
+                        $procInvoiced = 0.0;
+                        $procPaidAmount = 0.0;
+                        foreach ($procInvoices as $pi) {
+                            $procInvoiced += floatval($pi['amount']);
+                            $procPaidAmount += floatval($pi['paid_amount']);
+                        }
+                        $procOutstanding = $procInvoiced - $procPaidAmount;
+                        $procPaymentsTotal = 0.0;
+                        foreach ($procPayments as $pp) {
+                            $procPaymentsTotal += floatval($pp['amount']);
+                        }
+                        require_once __DIR__ . '/proc_common.php';
+                        ?>
+
+                        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:14px;margin-bottom:18px;">
+                            <div class="fin-stat-card">
+                                <div class="fin-stat-header"><div class="fin-stat-icon" style="background:linear-gradient(135deg,#6366F1,#4F46E5);">&#128221;</div></div>
+                                <div class="fin-stat-label">Invoiced</div>
+                                <div class="fin-stat-value">&#8369;<?php echo number_format($procInvoiced, 2); ?></div>
+                            </div>
+                            <div class="fin-stat-card">
+                                <div class="fin-stat-header"><div class="fin-stat-icon" style="background:linear-gradient(135deg,#10B981,#059669);">&#128179;</div></div>
+                                <div class="fin-stat-label">Paid (ledger)</div>
+                                <div class="fin-stat-value">&#8369;<?php echo number_format($procPaidAmount, 2); ?></div>
+                            </div>
+                            <div class="fin-stat-card">
+                                <div class="fin-stat-header"><div class="fin-stat-icon" style="background:linear-gradient(135deg,#EF4444,#DC2626);">&#9888;</div></div>
+                                <div class="fin-stat-label">Outstanding Balance</div>
+                                <div class="fin-stat-value">&#8369;<?php echo number_format($procOutstanding, 2); ?></div>
+                            </div>
+                            <div class="fin-stat-card">
+                                <div class="fin-stat-header"><div class="fin-stat-icon" style="background:linear-gradient(135deg,#0EA5E9,#0284C7);">&#128176;</div></div>
+                                <div class="fin-stat-label">Payments Recorded</div>
+                                <div class="fin-stat-value">&#8369;<?php echo number_format($procPaymentsTotal, 2); ?></div>
+                            </div>
+                        </div>
+                        <div class="fin-card" style="margin-bottom:18px;">
+                            <div class="fin-card-header">
+                                <div class="fin-card-title-wrap">
+                                    <div class="fin-card-title">&#128221; Supplier Invoices</div>
+                                    <div class="fin-card-subtitle">Invoices recorded between <?php echo htmlspecialchars($start_date); ?> and <?php echo htmlspecialchars($end_date); ?></div>
+                                </div>
+                            </div>
+                            <?php if (empty($procInvoices)): ?>
+                            <div class="fin-empty"><div class="fin-empty-icon">&#128269;</div><div class="fin-empty-title">No supplier invoices in this period</div></div>
+                            <?php else: ?>
+                            <div class="fin-table-wrap">
+                                <table class="fin-table">
+                                    <thead><tr><th>Invoice #</th><th>PO</th><th>Supplier</th><th>Date</th><th>Amount</th><th>Paid</th><th>Outstanding</th><th>Payment Status</th></tr></thead>
+                                    <tbody>
+                                        <?php foreach ($procInvoices as $pi): $outstandingPi = floatval($pi['amount']) - floatval($pi['paid_amount']); ?>
+                                        <tr>
+                                            <td><strong><?php echo htmlspecialchars($pi['invoice_number']); ?></strong></td>
+                                            <td><?php echo htmlspecialchars($pi['po_number'] ?? '—'); ?></td>
+                                            <td><?php echo htmlspecialchars($pi['supplier_name'] ?? '—'); ?></td>
+                                            <td><?php echo htmlspecialchars($pi['invoice_date'] ?? '—'); ?></td>
+                                            <td>&#8369;<?php echo number_format($pi['amount'], 2); ?></td>
+                                            <td>&#8369;<?php echo number_format($pi['paid_amount'], 2); ?></td>
+                                            <td>&#8369;<?php echo number_format(max(0, $outstandingPi), 2); ?></td>
+                                            <td><?php echo procPaymentBadge($pi['payment_status']); ?></td>
+                                        </tr>
+                                        <?php endforeach; ?>
+                                    </tbody>
+                                </table>
+                            </div>
+                            <?php endif; ?>
+                        </div>
+
+                        <div class="fin-card">
+                            <div class="fin-card-header">
+                                <div class="fin-card-title-wrap">
+                                    <div class="fin-card-title">&#128176; Supplier Payments</div>
+                                    <div class="fin-card-subtitle">Payments recorded between <?php echo htmlspecialchars($start_date); ?> and <?php echo htmlspecialchars($end_date); ?></div>
+                                </div>
+                            </div>
+                            <?php if (empty($procPayments)): ?>
+                            <div class="fin-empty"><div class="fin-empty-icon">&#128269;</div><div class="fin-empty-title">No supplier payments in this period</div></div>
+                            <?php else: ?>
+                            <div class="fin-table-wrap">
+                                <table class="fin-table">
+                                    <thead><tr><th>Date</th><th>Invoice #</th><th>Supplier</th><th>Method</th><th>Reference</th><th>Amount</th><th>Status</th></tr></thead>
+                                    <tbody>
+                                        <?php foreach ($procPayments as $pp): ?>
+                                        <tr>
+                                            <td><?php echo htmlspecialchars($pp['payment_date'] ?? date('Y-m-d', strtotime($pp['created_at']))); ?></td>
+                                            <td><strong><?php echo htmlspecialchars($pp['invoice_number']); ?></strong></td>
+                                            <td><?php echo htmlspecialchars($pp['supplier_name'] ?? '—'); ?></td>
+                                            <td><?php echo htmlspecialchars(str_replace('_', ' ', $pp['provider'])); ?></td>
+                                            <td><?php echo htmlspecialchars($pp['reference'] ?? '—'); ?></td>
+                                            <td>&#8369;<?php echo number_format($pp['amount'], 2); ?></td>
+                                            <td><span class="badge <?php echo $pp['status'] === 'paid' ? 'badge-success' : ($pp['status'] === 'failed' ? 'badge-danger' : 'badge-warning'); ?>"><?php echo htmlspecialchars(ucfirst($pp['status'])); ?></span></td>
+                                        </tr>
+                                        <?php endforeach; ?>
+                                    </tbody>
+                                </table>
+                            </div>
+                            <?php endif; ?>
+                        </div>
+
+
                     <?php endif; ?>
                     
                     <!-- ============================================ -->

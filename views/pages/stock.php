@@ -574,9 +574,19 @@ case 'stock':
                     }
                     </script>
                     
-                    <?php
+                    <?php if (!empty($_GET['low'])): ?>
+                    <script>
+                    document.addEventListener('DOMContentLoaded', function () {
+                        var stockFilterEl = document.getElementById('stockFilter');
+                        if (stockFilterEl) {
+                            stockFilterEl.value = 'low';
+                            if (typeof filterStock === 'function') { filterStock(); }
+                        }
+                    });
+                    </script>
+                    <?php endif; ?>
                     
-
+                    <?php
                     // ============================================
                     // SUPPLIERS PAGE
                     // ============================================

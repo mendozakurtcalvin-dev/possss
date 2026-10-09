@@ -107,6 +107,227 @@ function recordInventoryTransaction($productId, $transactionType, $quantity, $pr
 }
 
 // ============================================
+// PROCUREMENT WORKFLOW HELPERS
+// ============================================
+
+function generatePurchaseRequestNumber() {
+    global $pdo;
+    $prefix = 'PR-' . date('Y') . '-';
+    $stmt = $pdo->prepare("SELECT COUNT(*) FROM purchase_requests WHERE request_number LIKE ?");
+    $stmt->execute([$prefix . '%']);
+    $sequence = (int) $stmt->fetchColumn() + 1;
+    do {
+        $number = $prefix . str_pad((string) $sequence, 3, '0', STR_PAD_LEFT);
+        $check = $pdo->prepare("SELECT id FROM purchase_requests WHERE request_number = ?");
+        $check->execute([$number]);
+        if (!$check->fetch()) {
+            return $number;
+        }
+        $sequence++;
+    } while (true);
+}
+
+function generateGoodsReceiptNumber() {
+    global $pdo;
+    do {
+        $number = 'GRN-' . date('Ymd') . '-' . str_pad((string) random_int(1, 9999), 4, '0', STR_PAD_LEFT);
+        $stmt = $pdo->prepare("SELECT id FROM procurement_grns WHERE grn_number = ?");
+        $stmt->execute([$number]);
+    } while ($stmt->fetch());
+    return $number;
+}
+// PROCUREMENT_VALIDATOR_ANCHOR
+
+/**
+ * Server-side validation for purchase request payloads.
+ * Returns an array of human-readable errors (empty when valid) and,
+ * on success, fills $payload with normalized values and server-calculated totals.
+ */
+function validatePurchaseRequestPayload(array $post, array &$payload) {
+    global $pdo;
+    $errors = [];
+    $payload = [];
+
+    $supplierId = intval($post['supplier_id'] ?? 0);
+    if ($supplierId <= 0) {
+        $errors[] = 'Please select a supplier.';
+    } else {
+        $stmt = $pdo->prepare("SELECT id FROM suppliers WHERE id = ? AND status = 'active'");
+        $stmt->execute([$supplierId]);
+        if (!$stmt->fetchColumn()) {
+            $errors[] = 'The selected supplier does not exist or is not active.';
+        }
+    }
+
+    $requestDate = trim((string) ($post['request_date'] ?? ''));
+    if ($requestDate === '') {
+        $requestDate = date('Y-m-d');
+    }
+    $dateCheck = DateTime::createFromFormat('Y-m-d', $requestDate);
+    if (!$dateCheck || $dateCheck->format('Y-m-d') !== $requestDate) {
+        $errors[] = 'Enter a valid request date (YYYY-MM-DD).';
+    }
+
+    $reason = trim((string) ($post['reason'] ?? ''));
+    if ($reason === '') {
+        $errors[] = 'Reason for purchase is required.';
+    } elseif (mb_strlen($reason) > 1000) {
+        $errors[] = 'Reason for purchase must be 1,000 characters or fewer.';
+    }
+
+    $remarks = trim((string) ($post['remarks'] ?? ''));
+    if (mb_strlen($remarks) > 2000) {
+        $errors[] = 'Remarks must be 2,000 characters or fewer.';
+    }
+
+    $itemsRaw = $post['items'] ?? [];
+    if (is_string($itemsRaw)) {
+        $decoded = json_decode($itemsRaw, true);
+        $itemsRaw = is_array($decoded) ? $decoded : [];
+    }
+    if (!is_array($itemsRaw) || count($itemsRaw) === 0) {
+        $errors[] = 'Add at least one product to the purchase request.';
+        $itemsRaw = [];
+    }
+    $allowFree = getSetting('procurement_allow_free_items', '0') === '1';
+    $items = [];
+    $subtotal = 0.0;
+    $seenProducts = [];
+    foreach ($itemsRaw as $raw) {
+        if (!is_array($raw)) {
+            continue;
+        }
+        $productId = intval($raw['product_id'] ?? 0);
+        $quantity = filter_var($raw['quantity'] ?? null, FILTER_VALIDATE_INT);
+        $unitPrice = filter_var($raw['estimated_unit_price'] ?? null, FILTER_VALIDATE_FLOAT);
+
+        if ($productId <= 0) {
+            $errors[] = 'Every product row must have a product selected.';
+            continue;
+        }
+        if ($quantity === false || $quantity === null || $quantity < 1) {
+            $errors[] = 'Quantity must be a positive number for every product row.';
+            continue;
+        }
+        if ($unitPrice === false || $unitPrice === null || $unitPrice < 0) {
+            $errors[] = 'Estimated unit price must be a valid non-negative amount.';
+            continue;
+        }
+        if ($unitPrice <= 0 && !$allowFree) {
+            $errors[] = 'Estimated unit price must be greater than zero (free-of-charge items are not authorized).';
+            continue;
+        }
+        if (isset($seenProducts[$productId])) {
+            $errors[] = 'The same product appears more than once. Combine the quantities into a single row.';
+            continue;
+        }
+
+        $stmt = $pdo->prepare("SELECT id, name, unit, archived, active FROM products WHERE id = ?");
+        $stmt->execute([$productId]);
+        $product = $stmt->fetch();
+        if (!$product) {
+            $errors[] = 'A selected product no longer exists in the catalog.';
+            continue;
+        }
+        if ((int) $product['archived'] === 1 || (int) $product['active'] !== 1) {
+            $errors[] = 'Product "' . $product['name'] . '" is not eligible for purchase.';
+            continue;
+        }
+
+        $seenProducts[$productId] = true;
+        $lineTotal = round($quantity * $unitPrice, 2);
+        $subtotal += $lineTotal;
+        $items[] = [
+            'product_id' => $productId,
+            'item_name' => $product['name'],
+            'unit' => $product['unit'] ?: 'pc',
+            'quantity' => $quantity,
+            'estimated_unit_price' => round($unitPrice, 2),
+            'line_total' => $lineTotal,
+        ];
+    }
+    $subtotal = round($subtotal, 2);
+
+    // Configured purchasing limits / approval policy
+    $hardLimit = floatval(getSetting('procurement_max_amount', 0));
+    $approvalLimit = floatval(getSetting('procurement_approval_limit', 0));
+    $overLimit = 0;
+    if ($hardLimit > 0 && $subtotal > $hardLimit) {
+        $errors[] = 'The estimated total of ₱' . number_format($subtotal, 2) . ' exceeds the configured purchasing limit of ₱' . number_format($hardLimit, 2) . '.';
+    }
+    if ($approvalLimit > 0 && $subtotal > $approvalLimit) {
+        $overLimit = 1;
+    }
+
+    $payload = [
+        'supplier_id' => $supplierId,
+        'request_date' => $requestDate,
+        'reason' => $reason,
+        'remarks' => $remarks,
+        'items' => $items,
+        'subtotal' => $subtotal,
+        'grand_total' => $subtotal,
+        'over_limit' => $overLimit,
+    ];
+    return $errors;
+}
+/**
+ * Flags possible duplicate or unnecessary purchases so requesters and
+ * approvers can see stock levels, pending requests and open orders.
+ * Returns a list of warning strings (empty when nothing notable).
+ */
+function computePurchaseRequestWarnings($items, $excludeRequestId = 0) {
+    global $pdo;
+    $warnings = [];
+    foreach ($items as $item) {
+        $productId = intval($item['product_id'] ?? 0);
+        if ($productId <= 0) {
+            continue;
+        }
+        $stmt = $pdo->prepare("SELECT name, stock_quantity, low_stock_threshold FROM products WHERE id = ?");
+        $stmt->execute([$productId]);
+        $product = $stmt->fetch();
+        if (!$product) {
+            continue;
+        }
+        $stock = (int) $product['stock_quantity'];
+        $threshold = (int) $product['low_stock_threshold'];
+        $label = $product['name'];
+
+        $pendingStmt = $pdo->prepare(
+            "SELECT COALESCE(SUM(pri.quantity), 0) AS qty
+             FROM purchase_request_items pri
+             JOIN purchase_requests pr ON pr.id = pri.request_id
+             WHERE pri.product_id = ? AND pr.status IN ('pending_approval','approved')" .
+             ($excludeRequestId ? " AND pr.id <> ?" : "")
+        );
+        $pendingStmt->execute($excludeRequestId ? [$productId, $excludeRequestId] : [$productId]);
+        $pendingQty = (int) $pendingStmt->fetchColumn();
+
+        $openPoStmt = $pdo->prepare(
+            "SELECT COALESCE(SUM(pi.quantity - pi.quantity_received), 0) AS qty
+             FROM procurement_po_items pi
+             JOIN procurement_purchase_orders po ON po.id = pi.po_id
+             WHERE pi.product_id = ? AND po.status IN ('draft','ordered','sent','acknowledged','partially_received')"
+        );
+        $openPoStmt->execute([$productId]);
+        $openPoQty = (int) $openPoStmt->fetchColumn();
+
+        if ($pendingQty > 0) {
+            $warnings[] = $label . ': ' . $pendingQty . ' unit(s) already in other pending/approved purchase requests — possible duplicate purchase.';
+        }
+        if ($openPoQty > 0) {
+            $warnings[] = $label . ': ' . $openPoQty . ' unit(s) already on open purchase orders — possible duplicate purchase.';
+        }
+        if ($stock > $threshold && $pendingQty === 0 && $openPoQty === 0) {
+            $warnings[] = $label . ': current stock (' . $stock . ') is above the low-stock threshold (' . $threshold . ') — confirm this purchase is still needed.';
+        }
+    }
+    return $warnings;
+}
+
+
+// ============================================
 // AJAX request handlers
 // ============================================
 
@@ -128,7 +349,7 @@ if (isset($_GET['action'])) {
     header('Content-Type: application/json; charset=utf-8');
 
     // Enforce CSRF token on procurement & job posting write actions
-    $csrfActions = ['save_procurement', 'update_procurement_status', 'set_budget_status', 'save_rfq', 'update_rfq_status', 'save_quotation', 'select_quotation', 'create_po', 'update_po_status', 'save_grn', 'save_invoice', 'approve_invoice', 'pay_invoice_paymongo', 'mark_invoice_paid', 'save_supplier_payment', 'confirm_payment', 'rate_supplier', 'save_job_posting', 'update_job_posting_status', 'save_employee', 'save_product_evaluation'];
+    $csrfActions = ['save_procurement', 'update_procurement_status', 'set_budget_status', 'save_rfq', 'update_rfq_status', 'save_quotation', 'select_quotation', 'create_po', 'update_po_status', 'save_grn', 'save_invoice', 'approve_invoice', 'pay_invoice_paymongo', 'mark_invoice_paid', 'save_supplier_payment', 'confirm_payment', 'rate_supplier', 'save_job_posting', 'update_job_posting_status', 'save_employee', 'save_product_evaluation', 'pr_save', 'pr_submit', 'pr_cancel', 'pr_decide', 'po_from_request', 'po_issue', 'receipt_save', 'record_supplier_payment'];
     if ($_SERVER['REQUEST_METHOD'] === 'POST' && in_array($_GET['action'] ?? '', $csrfActions, true)) {
         verifyCsrf();
     }
@@ -1608,6 +1829,16 @@ if (isset($_GET['action'])) {
                     : 'This purchase request status transition is not allowed.');
             }
 
+            // Approving or rejecting is admin-only and self-approval is forbidden.
+            if (in_array($status, ['approved', 'rejected'], true)) {
+                if (!hasPermission('procurement_approve')) {
+                    throw new Exception('Only an admin account with approval permission can approve or reject purchase requests.');
+                }
+                if ((int) $req['requested_by'] === (int) $_SESSION['user_id']) {
+                    throw new Exception('You cannot approve or reject your own purchase request.');
+                }
+            }
+
             if ($status === 'received' && !empty($req['product_id'])) {
                 $s = $pdo->prepare("SELECT stock_quantity FROM products WHERE id = ? FOR UPDATE");
                 $s->execute([$req['product_id']]);
@@ -1818,6 +2049,40 @@ if (isset($_GET['action'])) {
         exit();
     }
 
+    if ($_GET['action'] == 'po_items') {
+        if (!canAccess('procurement')) {
+            echo json_encode(['success' => false, 'message' => 'Unauthorized']);
+            exit();
+        }
+        try {
+            $poId = intval($_GET['po_id'] ?? 0);
+            $poStmt = $pdo->prepare("
+                SELECT po.*, s.name AS supplier_name, pr.request_number
+                FROM procurement_purchase_orders po
+                LEFT JOIN suppliers s ON po.supplier_id = s.id
+                LEFT JOIN purchase_requests pr ON pr.id = po.purchase_request_id
+                WHERE po.id = ?
+            ");
+            $poStmt->execute([$poId]);
+            $poRow = $poStmt->fetch();
+            if (!$poRow) {
+                echo json_encode(['success' => false, 'message' => 'Purchase order not found.']);
+                exit();
+            }
+            $itemStmt = $pdo->prepare("
+                SELECT i.*, (i.quantity - i.quantity_received) AS outstanding
+                FROM procurement_po_items i
+                WHERE i.po_id = ?
+                ORDER BY i.id
+            ");
+            $itemStmt->execute([$poId]);
+            echo json_encode(['success' => true, 'po' => $poRow, 'items' => $itemStmt->fetchAll()]);
+        } catch (Exception $e) {
+            echo json_encode(['success' => false, 'message' => 'Could not load purchase order items.']);
+        }
+        exit();
+    }
+
     if ($_GET['action'] == 'create_po') {
         if (!canAccess('procurement_manage') && !isAdmin()) {
             echo json_encode(['success' => false, 'message' => 'Unauthorized']);
@@ -1925,7 +2190,7 @@ if (isset($_GET['action'])) {
             $currentStatus = $currentStmt->fetchColumn();
             if ($currentStatus === false) { echo json_encode(['success' => false, 'message' => 'Purchase order not found']); exit(); }
             $transitions = [
-                'draft' => ['pending', 'cancelled'],
+                'draft' => ['pending', 'ordered', 'cancelled'],
                 'pending' => ['approved', 'finance_pending', 'cancelled'],
                 'finance_pending' => ['approved', 'cancelled'],
                 'approved' => ['ordered', 'sent', 'acknowledged', 'cancelled'],
@@ -2127,6 +2392,10 @@ if (isset($_GET['action'])) {
     }
 
     if ($_GET['action'] == 'save_invoice') {
+        if (!canAccess('finance') && !hasRole('finance') && !isAdmin()) {
+            echo json_encode(['success' => false, 'message' => 'Unauthorized: Finance role required to record supplier invoices.']);
+            exit();
+        }
         try {
             $po_id = intval($_POST['po_id'] ?? 0);
             $invoice_number = trim($_POST['invoice_number'] ?? '');
@@ -2134,6 +2403,10 @@ if (isset($_GET['action'])) {
             if (!$po_id || $invoice_number === '' || $amount <= 0) { echo json_encode(['success' => false, 'message' => 'PO, invoice number and amount required']); exit(); }
             $po = $pdo->prepare("SELECT * FROM procurement_purchase_orders WHERE id = ?"); $po->execute([$po_id]);
             $poRow = $po->fetch();
+            if (!$poRow) { echo json_encode(['success' => false, 'message' => 'Purchase order not found']); exit(); }
+            $dupe = $pdo->prepare("SELECT id FROM procurement_invoices WHERE invoice_number = ?");
+            $dupe->execute([$invoice_number]);
+            if ($dupe->fetchColumn()) { echo json_encode(['success' => false, 'message' => 'An invoice with this invoice number already exists.']); exit(); }
             $grn = $pdo->prepare("SELECT * FROM procurement_grns WHERE po_id = ? ORDER BY created_at DESC LIMIT 1"); $grn->execute([$po_id]);
             $grnRow = $grn->fetch();
             // 3-way match: invoice amount vs PO total, GRN exists
@@ -2144,14 +2417,19 @@ if (isset($_GET['action'])) {
             } elseif (!$grnRow) {
                 $match = 'mismatch';
             }
-            $stmt = $pdo->prepare("INSERT INTO procurement_invoices (invoice_number, po_id, grn_id, supplier_id, invoice_date, amount, match_status, notes) VALUES (?, ?, ?, ?, ?, ?, ?, ?)");
-            $stmt->execute([$invoice_number, $po_id, $grnRow ? $grnRow['id'] : null, $poRow ? $poRow['supplier_id'] : null, !empty($_POST['invoice_date']) ? $_POST['invoice_date'] : date('Y-m-d'), $amount, $match, $_POST['notes'] ?? '']);
+            $stmt = $pdo->prepare("INSERT INTO procurement_invoices (invoice_number, po_id, grn_id, supplier_id, invoice_date, amount, match_status, notes, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)");
+            $stmt->execute([$invoice_number, $po_id, $grnRow ? $grnRow['id'] : null, $poRow ? $poRow['supplier_id'] : null, !empty($_POST['invoice_date']) ? $_POST['invoice_date'] : date('Y-m-d'), $amount, $match, $_POST['notes'] ?? '', $_SESSION['user_id']]);
+            logActivity('invoice_recorded', "Invoice $invoice_number (₱" . number_format($amount, 2) . ") recorded for PO #$po_id");
             echo json_encode(['success' => true, 'match_status' => $match]);
-        } catch (Exception $e) { echo json_encode(['success' => false, 'message' => $e->getMessage()]); }
+        } catch (Exception $e) { echo json_encode(['success' => false, 'message' => 'Could not save the invoice.']); }
         exit();
     }
 
     if ($_GET['action'] == 'approve_invoice') {
+        if (!canAccess('finance') && !hasRole('finance') && !isAdmin()) {
+            echo json_encode(['success' => false, 'message' => 'Unauthorized: Finance role required.']);
+            exit();
+        }
         try {
             $id = intval($_POST['id'] ?? 0);
             $pdo->prepare("UPDATE procurement_invoices SET match_status = 'approved' WHERE id = ? AND match_status IN ('matched','approved')")->execute([$id]);
@@ -2162,6 +2440,10 @@ if (isset($_GET['action'])) {
 
     // ---- PAYMONGO PAYMENT ----
     if ($_GET['action'] == 'pay_invoice_paymongo') {
+        if (!canAccess('finance') && !hasRole('finance') && !isAdmin()) {
+            echo json_encode(['success' => false, 'message' => 'Unauthorized: Finance role required.']);
+            exit();
+        }
         try {
             $id = intval($_POST['id'] ?? 0);
             $inv = $pdo->prepare("SELECT * FROM procurement_invoices WHERE id = ?"); $inv->execute([$id]);
@@ -2211,9 +2493,13 @@ if (isset($_GET['action'])) {
     }
 
     if ($_GET['action'] == 'mark_invoice_paid') {
+        if (!canAccess('finance') && !hasRole('finance') && !isAdmin()) {
+            echo json_encode(['success' => false, 'message' => 'Unauthorized: Finance role required.']);
+            exit();
+        }
         try {
             $id = intval($_POST['id'] ?? 0);
-            $pdo->prepare("UPDATE procurement_invoices SET payment_status = 'paid', paid_at = NOW() WHERE id = ?")->execute([$id]);
+            $pdo->prepare("UPDATE procurement_invoices SET payment_status = 'paid', paid_at = NOW(), paid_amount = amount WHERE id = ?")->execute([$id]);
             $pdo->prepare("UPDATE procurement_payments SET status = 'paid', paid_at = NOW() WHERE invoice_id = ? AND status = 'pending'")->execute([$id]);
             $inv = $pdo->prepare("SELECT po_id FROM procurement_invoices WHERE id = ?"); $inv->execute([$id]);
             $row = $inv->fetch();
@@ -2325,6 +2611,10 @@ if (isset($_GET['action'])) {
 
     // ---- SUPPLIER PAYMENT (real-world: bank transfer / check) ----
     if ($_GET['action'] == 'save_supplier_payment') {
+        if (!canAccess('finance') && !hasRole('finance') && !isAdmin()) {
+            echo json_encode(['success' => false, 'message' => 'Unauthorized: Finance role required.']);
+            exit();
+        }
         try {
             $id = intval($_POST['invoice_id'] ?? 0);
             $method = $_POST['method'] ?? 'bank_transfer';
@@ -2333,18 +2623,30 @@ if (isset($_GET['action'])) {
             $invoice = $inv->fetch();
             if (!$invoice) { echo json_encode(['success' => false, 'message' => 'Invoice not found']); exit(); }
             if ($invoice['payment_status'] === 'paid') { echo json_encode(['success' => false, 'message' => 'Already paid']); exit(); }
-            $stmt = $pdo->prepare("INSERT INTO procurement_payments (invoice_id, provider, reference, amount, status) VALUES (?, ?, ?, ?, 'pending')");
-            $stmt->execute([$id, $method, trim($_POST['reference'] ?? ''), floatval($invoice['amount'])]);
+            $reference = trim($_POST['reference'] ?? '');
+            if ($reference !== '') {
+                $dupe = $pdo->prepare("SELECT id FROM procurement_payments WHERE invoice_id = ? AND reference = ?");
+                $dupe->execute([$id, $reference]);
+                if ($dupe->fetchColumn()) { echo json_encode(['success' => false, 'message' => 'A payment with this reference has already been recorded for this invoice.']); exit(); }
+            }
+            $stmt = $pdo->prepare("INSERT INTO procurement_payments (invoice_id, provider, reference, amount, status, payment_date, created_by) VALUES (?, ?, ?, ?, 'pending', ?, ?)");
+            $stmt->execute([$id, $method, $reference !== '' ? $reference : null, floatval($invoice['amount']), date('Y-m-d'), $_SESSION['user_id']]);
             logActivity('supplier_payment', "$method payment recorded for invoice #$id, ref: " . ($_POST['reference'] ?? ''));
             echo json_encode(['success' => true]);
+        } catch (PDOException $e) {
+            echo json_encode(['success' => false, 'message' => (int) $e->getCode() === 23000 ? 'A payment with this reference already exists for this invoice.' : 'Could not record the payment.']);
         } catch (Exception $e) { echo json_encode(['success' => false, 'message' => $e->getMessage()]); }
         exit();
     }
 
     if ($_GET['action'] == 'confirm_payment') {
+        if (!canAccess('finance') && !hasRole('finance') && !isAdmin()) {
+            echo json_encode(['success' => false, 'message' => 'Unauthorized: Finance role required.']);
+            exit();
+        }
         try {
             $id = intval($_POST['invoice_id'] ?? 0);
-            $pdo->prepare("UPDATE procurement_invoices SET payment_status = 'paid', paid_at = NOW() WHERE id = ? AND payment_status = 'unpaid'")->execute([$id]);
+            $pdo->prepare("UPDATE procurement_invoices SET payment_status = 'paid', paid_at = NOW(), paid_amount = amount WHERE id = ? AND payment_status <> 'paid'")->execute([$id]);
             $pdo->prepare("UPDATE procurement_payments SET status = 'paid', paid_at = NOW() WHERE invoice_id = ? AND status = 'pending'")->execute([$id]);
             $inv = $pdo->prepare("SELECT po_id FROM procurement_invoices WHERE id = ?"); $inv->execute([$id]);
             $row = $inv->fetch();
@@ -2354,6 +2656,905 @@ if (isset($_GET['action'])) {
             logActivity('payment_confirmed', "Payment confirmed for invoice #$id");
             echo json_encode(['success' => true]);
         } catch (Exception $e) { echo json_encode(['success' => false, 'message' => $e->getMessage()]); }
+        exit();
+    }
+
+    // ---- PURCHASE REQUEST WORKFLOW (multi-product) ----
+
+    // ---- GET PURCHASE REQUEST DETAILS (items + approval history + linked PO) ----
+    if ($_GET['action'] == 'pr_get') {
+        if (!canAccess('procurement') && !hasPermission('procurement_approve')) {
+            echo json_encode(['success' => false, 'message' => 'Unauthorized']);
+            exit();
+        }
+        try {
+            $id = intval($_POST['id'] ?? $_GET['id'] ?? 0);
+            $stmt = $pdo->prepare("
+                SELECT pr.*, s.name AS supplier_name, s.email AS supplier_email,
+                    u.full_name AS requester_name, u.username AS requester_username,
+                    d.full_name AS decided_by_name
+                FROM purchase_requests pr
+                LEFT JOIN suppliers s ON pr.supplier_id = s.id
+                LEFT JOIN users u ON pr.requester_id = u.id
+                LEFT JOIN users d ON pr.decided_by = d.id
+                WHERE pr.id = ?
+            ");
+            $stmt->execute([$id]);
+            $request = $stmt->fetch();
+            if (!$request) {
+                echo json_encode(['success' => false, 'message' => 'Purchase request not found.']);
+                exit();
+            }
+            // Ownership / permitted access check
+            $isApprover = hasPermission('procurement_approve');
+            $isManager = canAccess('procurement_manage') || isAdmin();
+            $isOwner = (int) $request['requester_id'] === (int) ($_SESSION['user_id'] ?? 0);
+            if (!$isApprover && !$isManager && !$isOwner && $request['status'] !== 'approved') {
+                echo json_encode(['success' => false, 'message' => 'You are not allowed to view this purchase request.']);
+                exit();
+            }
+
+            $itemsStmt = $pdo->prepare("
+                SELECT i.*, p.stock_quantity, p.low_stock_threshold, p.unit AS catalog_unit
+                FROM purchase_request_items i
+                LEFT JOIN products p ON p.id = i.product_id
+                WHERE i.request_id = ?
+                ORDER BY i.id
+            ");
+            $itemsStmt->execute([$id]);
+            $items = $itemsStmt->fetchAll();
+
+            $logStmt = $pdo->prepare("
+                SELECT l.*, u.full_name AS actor_name
+                FROM procurement_approval_logs l
+                LEFT JOIN users u ON l.actor_id = u.id
+                WHERE l.request_id = ?
+                ORDER BY l.created_at DESC, l.id DESC
+            ");
+            $logStmt->execute([$id]);
+            $logs = $logStmt->fetchAll();
+
+            $poStmt = $pdo->prepare("
+                SELECT id, po_number, status, total_amount, created_at
+                FROM procurement_purchase_orders
+                WHERE purchase_request_id = ?
+                ORDER BY id DESC LIMIT 1
+            ");
+            $poStmt->execute([$id]);
+            $po = $poStmt->fetch() ?: null;
+
+            echo json_encode([
+                'success' => true,
+                'request' => $request,
+                'items' => $items,
+                'logs' => $logs,
+                'po' => $po,
+                'warnings' => computePurchaseRequestWarnings($items, $id),
+                'can_decide' => $isApprover && $request['status'] === 'pending_approval' && !$isOwner,
+                'can_edit' => $isOwner && in_array($request['status'], ['draft', 'revision_requested'], true),
+            ]);
+        } catch (Exception $e) {
+            error_log('pr_get failed: ' . $e->getMessage());
+            echo json_encode(['success' => false, 'message' => 'Could not load the purchase request.']);
+        }
+        exit();
+    }
+
+    // ---- CREATE / UPDATE PURCHASE REQUEST (draft) ----
+    if ($_GET['action'] == 'pr_save') {
+        if (!canAccess('procurement')) {
+            echo json_encode(['success' => false, 'message' => 'Unauthorized']);
+            exit();
+        }
+        try {
+            $id = intval($_POST['id'] ?? 0);
+            $payload = [];
+            $errors = validatePurchaseRequestPayload($_POST, $payload);
+            if (count($errors) > 0) {
+                echo json_encode(['success' => false, 'message' => implode(' ', array_slice($errors, 0, 3)), 'errors' => $errors]);
+                exit();
+            }
+
+            // Optional supplier quotation attachment (same security rules as product images)
+            $attachmentPath = null;
+            if (isset($_FILES['attachment']) && $_FILES['attachment']['error'] === UPLOAD_ERR_OK) {
+                if ($_FILES['attachment']['size'] > 5 * 1024 * 1024) {
+                    echo json_encode(['success' => false, 'message' => 'Attachment is too large. Maximum 5MB allowed.']);
+                    exit();
+                }
+                $allowedTypes = ['application/pdf', 'image/jpeg', 'image/png'];
+                $finfo = finfo_open(FILEINFO_MIME_TYPE);
+                $mimeType = finfo_file($finfo, $_FILES['attachment']['tmp_name']);
+                finfo_close($finfo);
+                if (!in_array($mimeType, $allowedTypes, true)) {
+                    echo json_encode(['success' => false, 'message' => 'Invalid attachment type. Please upload a PDF, JPEG, or PNG file.']);
+                    exit();
+                }
+                $extension = strtolower(pathinfo($_FILES['attachment']['name'], PATHINFO_EXTENSION));
+                if (!in_array($extension, ['pdf', 'jpg', 'jpeg', 'png'], true)) {
+                    echo json_encode(['success' => false, 'message' => 'Invalid attachment extension.']);
+                    exit();
+                }
+                $uploadDir = 'uploads/quotations/';
+                if (!is_dir($uploadDir)) {
+                    mkdir($uploadDir, 0777, true);
+                }
+                $fileName = time() . '_' . uniqid() . '.' . $extension;
+                if (move_uploaded_file($_FILES['attachment']['tmp_name'], $uploadDir . $fileName)) {
+                    $attachmentPath = $uploadDir . $fileName;
+                } else {
+                    echo json_encode(['success' => false, 'message' => 'Failed to store the attachment file.']);
+                    exit();
+                }
+            }
+
+            $pdo->beginTransaction();
+            $warnings = computePurchaseRequestWarnings($payload['items'], $id);
+            $duplicateFlag = count(array_filter($warnings, function ($w) { return stripos($w, 'duplicate') !== false; })) > 0 ? 1 : 0;
+            if ($id > 0) {
+                $rowStmt = $pdo->prepare("SELECT * FROM purchase_requests WHERE id = ? FOR UPDATE");
+                $rowStmt->execute([$id]);
+                $existing = $rowStmt->fetch();
+                if (!$existing) {
+                    throw new Exception('Purchase request not found.');
+                }
+                $isOwner = (int) $existing['requester_id'] === (int) $_SESSION['user_id'];
+                if (!$isOwner && !isAdmin()) {
+                    throw new Exception('You can only edit your own purchase requests.');
+                }
+                if (!in_array($existing['status'], ['draft', 'revision_requested'], true)) {
+                    throw new Exception('This request has already been submitted and can no longer be edited.');
+                }
+                $stmt = $pdo->prepare("
+                    UPDATE purchase_requests
+                    SET supplier_id = ?, request_date = ?, reason = ?, remarks = ?,
+                        subtotal = ?, grand_total = ?, over_limit = ?, duplicate_flag = ?, duplicate_notes = ?
+                    WHERE id = ? AND status IN ('draft','revision_requested')
+                ");
+                $stmt->execute([
+                    $payload['supplier_id'], $payload['request_date'], $payload['reason'], $payload['remarks'],
+                    $payload['subtotal'], $payload['grand_total'], $payload['over_limit'],
+                    $duplicateFlag, implode("\n", $warnings), $id
+                ]);
+                $check = $pdo->prepare("SELECT status FROM purchase_requests WHERE id = ?");
+                $check->execute([$id]);
+                if (!in_array($check->fetchColumn(), ['draft', 'revision_requested'], true)) {
+                    throw new Exception('This request has already been submitted and can no longer be edited.');
+                }
+                if ($attachmentPath !== null) {
+                    $pdo->prepare("UPDATE purchase_requests SET attachment_path = ? WHERE id = ?")->execute([$attachmentPath, $id]);
+                }
+                $pdo->prepare("DELETE FROM purchase_request_items WHERE request_id = ?")->execute([$id]);
+                $logAction = 'edited';
+                $logComment = 'Purchase request updated.';
+            } else {
+                $requestNumber = generatePurchaseRequestNumber();
+                $stmt = $pdo->prepare("
+                    INSERT INTO purchase_requests
+                    (request_number, supplier_id, request_date, requester_id, reason, remarks, attachment_path,
+                     status, subtotal, grand_total, over_limit, duplicate_flag, duplicate_notes)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, 'draft', ?, ?, ?, ?, ?)
+                ");
+                $stmt->execute([
+                    $requestNumber, $payload['supplier_id'], $payload['request_date'], $_SESSION['user_id'],
+                    $payload['reason'], $payload['remarks'], $attachmentPath,
+                    $payload['subtotal'], $payload['grand_total'], $payload['over_limit'],
+                    $duplicateFlag, implode("\n", $warnings)
+                ]);
+                $id = intval($pdo->lastInsertId());
+                $logAction = 'created';
+                $logComment = 'Purchase request created as draft.';
+            }
+
+            $itemStmt = $pdo->prepare("
+                INSERT INTO purchase_request_items
+                (request_id, product_id, item_name, unit, quantity, estimated_unit_price, line_total)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            ");
+            foreach ($payload['items'] as $item) {
+                $itemStmt->execute([
+                    $id, $item['product_id'], $item['item_name'], $item['unit'],
+                    $item['quantity'], $item['estimated_unit_price'], $item['line_total']
+                ]);
+            }
+
+            $pdo->prepare("
+                INSERT INTO procurement_approval_logs (request_id, action, previous_status, new_status, actor_id, actor_role, comments)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            ")->execute([$id, $logAction, 'draft', 'draft', $_SESSION['user_id'], $_SESSION['role'] ?? '', $logComment]);
+
+            $pdo->commit();
+            logActivity('purchase_request_saved', "Purchase request #$id saved as draft");
+            $numberStmt = $pdo->prepare("SELECT request_number FROM purchase_requests WHERE id = ?");
+            $numberStmt->execute([$id]);
+            echo json_encode([
+                'success' => true,
+                'id' => $id,
+                'request_number' => $numberStmt->fetchColumn(),
+                'status' => 'draft',
+                'warnings' => $warnings
+            ]);
+        } catch (PDOException $e) {
+            if ($pdo->inTransaction()) $pdo->rollBack();
+            error_log('pr_save failed: ' . $e->getMessage());
+            echo json_encode(['success' => false, 'message' => (int) $e->getCode() === 23000 ? 'That request number already exists. Please try again.' : 'Could not save the purchase request.']);
+        } catch (Exception $e) {
+            if ($pdo->inTransaction()) $pdo->rollBack();
+            echo json_encode(['success' => false, 'message' => $e->getMessage()]);
+        }
+        exit();
+    }
+
+    // ---- SUBMIT PURCHASE REQUEST FOR APPROVAL ----
+    if ($_GET['action'] == 'pr_submit') {
+        if (!canAccess('procurement')) {
+            echo json_encode(['success' => false, 'message' => 'Unauthorized']);
+            exit();
+        }
+        try {
+            $id = intval($_POST['id'] ?? 0);
+            if ($id <= 0) {
+                throw new Exception('Purchase request not found.');
+            }
+            $pdo->beginTransaction();
+            $rowStmt = $pdo->prepare("SELECT * FROM purchase_requests WHERE id = ? FOR UPDATE");
+            $rowStmt->execute([$id]);
+            $request = $rowStmt->fetch();
+            if (!$request) {
+                throw new Exception('Purchase request not found.');
+            }
+            $isOwner = (int) $request['requester_id'] === (int) $_SESSION['user_id'];
+            if (!$isOwner && !isAdmin()) {
+                throw new Exception('You can only submit your own purchase requests.');
+            }
+            if (!in_array($request['status'], ['draft', 'revision_requested'], true)) {
+                throw new Exception('Only drafts or requests marked "Revision Requested" can be submitted.');
+            }
+
+            // Full server-side re-validation at submit time
+            $itemsStmt = $pdo->prepare("SELECT * FROM purchase_request_items WHERE request_id = ? ORDER BY id");
+            $itemsStmt->execute([$id]);
+            $storedItems = $itemsStmt->fetchAll();
+            if (count($storedItems) === 0) {
+                throw new Exception('Add at least one product to the purchase request.');
+            }
+            $revalidatePost = [
+                'supplier_id' => $request['supplier_id'],
+                'request_date' => $request['request_date'],
+                'reason' => $request['reason'],
+                'remarks' => $request['remarks'],
+                'items' => array_map(function ($item) {
+                    return [
+                        'product_id' => $item['product_id'],
+                        'quantity' => $item['quantity'],
+                        'estimated_unit_price' => $item['estimated_unit_price'],
+                    ];
+                }, $storedItems),
+            ];
+            $payload = [];
+            $errors = validatePurchaseRequestPayload($revalidatePost, $payload);
+            if (count($errors) > 0) {
+                throw new Exception(implode(' ', $errors));
+            }
+
+            $warnings = computePurchaseRequestWarnings($payload['items'], $id);
+            $duplicateFlag = count(array_filter($warnings, function ($w) { return stripos($w, 'duplicate') !== false; })) > 0 ? 1 : 0;
+
+            $newStatus = 'pending_approval';
+            $stmt = $pdo->prepare("
+                UPDATE purchase_requests
+                SET status = ?, submitted_at = NOW(), subtotal = ?, grand_total = ?, over_limit = ?,
+                    duplicate_flag = ?, duplicate_notes = ?
+                WHERE id = ? AND status IN ('draft','revision_requested')
+            ");
+            $stmt->execute([
+                $newStatus, $payload['subtotal'], $payload['grand_total'], $payload['over_limit'],
+                $duplicateFlag, implode("\n", $warnings), $id
+            ]);
+            if ($stmt->rowCount() === 0) {
+                throw new Exception('This request was changed by another user. Refresh and try again.');
+            }
+
+            $previousStatus = $request['status'];
+            $logAction = $previousStatus === 'revision_requested' ? 'resubmitted' : 'submitted';
+            $pdo->prepare("
+                INSERT INTO procurement_approval_logs (request_id, action, previous_status, new_status, actor_id, actor_role, comments)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            ")->execute([$id, $logAction, $previousStatus, $newStatus, $_SESSION['user_id'], $_SESSION['role'] ?? '', 'Submitted for admin approval.']);
+
+            notifyProcurement('Purchase request pending approval',
+                $request['request_number'] . ' (' . number_format($payload['grand_total'], 2) . ') is waiting for admin approval.',
+                $id, $storedItems[0]['product_id'] ?? null);
+
+            $pdo->commit();
+            logActivity('purchase_request_submitted', "Purchase request {$request['request_number']} submitted for approval");
+            echo json_encode([
+                'success' => true,
+                'id' => $id,
+                'request_number' => $request['request_number'],
+                'status' => $newStatus,
+                'warnings' => $warnings
+            ]);
+        } catch (Exception $e) {
+            if ($pdo->inTransaction()) $pdo->rollBack();
+            echo json_encode(['success' => false, 'message' => $e->getMessage()]);
+        }
+        exit();
+    }
+
+    // ---- CANCEL PURCHASE REQUEST ----
+    if ($_GET['action'] == 'pr_cancel') {
+        if (!canAccess('procurement')) {
+            echo json_encode(['success' => false, 'message' => 'Unauthorized']);
+            exit();
+        }
+        try {
+            $id = intval($_POST['id'] ?? 0);
+            $comment = trim($_POST['comment'] ?? '');
+            $pdo->beginTransaction();
+            $rowStmt = $pdo->prepare("SELECT * FROM purchase_requests WHERE id = ? FOR UPDATE");
+            $rowStmt->execute([$id]);
+            $request = $rowStmt->fetch();
+            if (!$request) {
+                throw new Exception('Purchase request not found.');
+            }
+            $isOwner = (int) $request['requester_id'] === (int) $_SESSION['user_id'];
+            if (!$isOwner && !isAdmin()) {
+                throw new Exception('You can only cancel your own purchase requests.');
+            }
+            if (!in_array($request['status'], ['draft', 'pending_approval', 'revision_requested'], true)) {
+                throw new Exception('Only draft, pending, or revision-requested purchases can be cancelled.');
+            }
+            $stmt = $pdo->prepare("UPDATE purchase_requests SET status = 'cancelled' WHERE id = ? AND status IN ('draft','pending_approval','revision_requested')");
+            $stmt->execute([$id]);
+            if ($stmt->rowCount() === 0) {
+                throw new Exception('This request can no longer be cancelled.');
+            }
+            $pdo->prepare("
+                INSERT INTO procurement_approval_logs (request_id, action, previous_status, new_status, actor_id, actor_role, comments)
+                VALUES (?, 'cancelled', ?, 'cancelled', ?, ?, ?)
+            ")->execute([$id, $request['status'], $_SESSION['user_id'], $_SESSION['role'] ?? '', $comment !== '' ? $comment : 'Cancelled by requester.']);
+            $pdo->commit();
+            logActivity('purchase_request_cancelled', "Purchase request {$request['request_number']} cancelled");
+            echo json_encode(['success' => true, 'id' => $id, 'status' => 'cancelled']);
+        } catch (Exception $e) {
+            if ($pdo->inTransaction()) $pdo->rollBack();
+            echo json_encode(['success' => false, 'message' => $e->getMessage()]);
+        }
+        exit();
+    }
+
+    // ---- ADMIN DECISION: APPROVE / REJECT / REQUEST REVISION ----
+    if ($_GET['action'] == 'pr_decide') {
+        if (!hasPermission('procurement_approve')) {
+            echo json_encode(['success' => false, 'message' => 'Unauthorized: only admin accounts with approval permission can decide on purchase requests.']);
+            exit();
+        }
+        try {
+            $id = intval($_POST['id'] ?? 0);
+            $decision = $_POST['decision'] ?? '';
+            $comments = trim($_POST['comments'] ?? '');
+            if (!in_array($decision, ['approve', 'reject', 'revision'], true)) {
+                echo json_encode(['success' => false, 'message' => 'Invalid decision.']);
+                exit();
+            }
+            if ($decision === 'reject' && $comments === '') {
+                echo json_encode(['success' => false, 'message' => 'A rejection reason is required.']);
+                exit();
+            }
+            if ($decision === 'revision' && $comments === '') {
+                echo json_encode(['success' => false, 'message' => 'A revision comment is required.']);
+                exit();
+            }
+
+            $pdo->beginTransaction();
+            $rowStmt = $pdo->prepare("SELECT * FROM purchase_requests WHERE id = ? FOR UPDATE");
+            $rowStmt->execute([$id]);
+            $request = $rowStmt->fetch();
+            if (!$request) {
+                throw new Exception('Purchase request not found.');
+            }
+            // Self-approval prevention (backend enforced)
+            if ((int) $request['requester_id'] === (int) $_SESSION['user_id']) {
+                throw new Exception('You cannot approve or reject your own purchase request.');
+            }
+            // Duplicate / concurrent decision prevention
+            if ($request['status'] !== 'pending_approval') {
+                throw new Exception('This purchase request has already been processed (current status: ' . ucfirst(str_replace('_', ' ', $request['status'])) . ').');
+            }
+
+            if ($decision === 'approve') {
+                // Approve only requests that pass validation
+                $itemsStmt = $pdo->prepare("SELECT * FROM purchase_request_items WHERE request_id = ?");
+                $itemsStmt->execute([$id]);
+                $items = $itemsStmt->fetchAll();
+                if (count($items) === 0) {
+                    throw new Exception('Cannot approve: this request has no product lines.');
+                }
+                $supplierStmt = $pdo->prepare("SELECT status FROM suppliers WHERE id = ?");
+                $supplierStmt->execute([$request['supplier_id']]);
+                $supplierStatus = $supplierStmt->fetchColumn();
+                if (!$supplierStatus || $supplierStatus !== 'active') {
+                    throw new Exception('Cannot approve: the selected supplier is missing or inactive.');
+                }
+                if (floatval($request['grand_total']) <= 0) {
+                    throw new Exception('Cannot approve: the estimated total must be greater than zero.');
+                }
+                $newStatus = 'approved';
+                $logAction = 'approved';
+            } elseif ($decision === 'reject') {
+                $newStatus = 'rejected';
+                $logAction = 'rejected';
+            } else {
+                $newStatus = 'revision_requested';
+                $logAction = 'revision_requested';
+            }
+
+            $stmt = $pdo->prepare("
+                UPDATE purchase_requests
+                SET status = ?, decided_by = ?, decided_at = NOW(), admin_comment = ?
+                WHERE id = ? AND status = 'pending_approval'
+            ");
+            $stmt->execute([$newStatus, $_SESSION['user_id'], $comments !== '' ? $comments : null, $id]);
+            if ($stmt->rowCount() === 0) {
+                throw new Exception('This purchase request was just processed by another user.');
+            }
+
+            $pdo->prepare("
+                INSERT INTO procurement_approval_logs (request_id, action, previous_status, new_status, actor_id, actor_role, comments)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            ")->execute([$id, $logAction, 'pending_approval', $newStatus, $_SESSION['user_id'], $_SESSION['role'] ?? '', $comments]);
+
+            $feedback = [
+                'approved' => 'has been approved.',
+                'rejected' => 'was rejected' . ($comments !== '' ? ': ' . $comments : '.'),
+                'revision_requested' => 'needs revisions' . ($comments !== '' ? ': ' . $comments : '.'),
+            ];
+            notifyProcurement('Purchase request ' . ucfirst(str_replace('_', ' ', $newStatus)),
+                $request['request_number'] . ' ' . $feedback[$newStatus],
+                $id);
+
+            $pdo->commit();
+            logActivity('purchase_request_' . $logAction, "Purchase request {$request['request_number']} {$logAction} by " . ($_SESSION['username'] ?? ''));
+            echo json_encode(['success' => true, 'id' => $id, 'status' => $newStatus]);
+        } catch (Exception $e) {
+            if ($pdo->inTransaction()) $pdo->rollBack();
+            echo json_encode(['success' => false, 'message' => $e->getMessage()]);
+        }
+        exit();
+    }
+
+    // ---- CREATE PURCHASE ORDER FROM AN APPROVED REQUEST ----
+    if ($_GET['action'] == 'po_from_request') {
+        if (!canAccess('procurement_manage') && !isAdmin()) {
+            echo json_encode(['success' => false, 'message' => 'Unauthorized']);
+            exit();
+        }
+        try {
+            $requestId = intval($_POST['request_id'] ?? 0);
+            if ($requestId <= 0) {
+                throw new Exception('Purchase request not found.');
+            }
+            $pdo->beginTransaction();
+            $reqStmt = $pdo->prepare("SELECT * FROM purchase_requests WHERE id = ? FOR UPDATE");
+            $reqStmt->execute([$requestId]);
+            $request = $reqStmt->fetch();
+            if (!$request) {
+                throw new Exception('Purchase request not found.');
+            }
+            if ($request['status'] !== 'approved') {
+                throw new Exception('A purchase order can only be created from an approved purchase request.');
+            }
+            $existingPo = $pdo->prepare("SELECT po_number FROM procurement_purchase_orders WHERE purchase_request_id = ?");
+            $existingPo->execute([$requestId]);
+            $existingPoNumber = $existingPo->fetchColumn();
+            if ($existingPoNumber) {
+                throw new Exception('Purchase order ' . $existingPoNumber . ' has already been created for this request.');
+            }
+            $supplierStmt = $pdo->prepare("SELECT id FROM suppliers WHERE id = ? AND status = 'active'");
+            $supplierStmt->execute([$request['supplier_id']]);
+            if (!$supplierStmt->fetchColumn()) {
+                throw new Exception('The supplier for this request is no longer active.');
+            }
+
+            $itemsStmt = $pdo->prepare("SELECT * FROM purchase_request_items WHERE request_id = ? ORDER BY id");
+            $itemsStmt->execute([$requestId]);
+            $items = $itemsStmt->fetchAll();
+            if (count($items) === 0) {
+                throw new Exception('The approved request has no product lines.');
+            }
+
+            $subtotal = 0.0;
+            foreach ($items as $item) {
+                $subtotal += floatval($item['line_total']);
+            }
+            $subtotal = round($subtotal, 2);
+            $taxAmount = round($subtotal * (floatval(getSetting('tax_rate', 12)) / 100), 2);
+            $totalAmount = round($subtotal + $taxAmount, 2);
+            $poNumber = generatePoNumber();
+            $expectedDelivery = !empty($_POST['expected_delivery']) ? $_POST['expected_delivery'] : null;
+            if ($expectedDelivery !== null) {
+                $dateCheck = DateTime::createFromFormat('Y-m-d', $expectedDelivery);
+                if (!$dateCheck || $dateCheck->format('Y-m-d') !== $expectedDelivery) {
+                    throw new Exception('Enter a valid expected delivery date.');
+                }
+            }
+
+            $stmt = $pdo->prepare("
+                INSERT INTO procurement_purchase_orders
+                (po_number, purchase_request_id, supplier_id, order_date, expected_delivery, subtotal, tax_amount,
+                 total_amount, payment_terms, status, notes, created_by)
+                VALUES (?, ?, ?, CURDATE(), ?, ?, ?, ?, ?, 'draft', ?, ?)
+            ");
+            $stmt->execute([
+                $poNumber, $requestId, $request['supplier_id'], $expectedDelivery,
+                $subtotal, $taxAmount, $totalAmount,
+                $_POST['payment_terms'] ?? 'Net 30',
+                trim($_POST['notes'] ?? '') !== '' ? $_POST['notes'] : ('Generated from approved request ' . $request['request_number']),
+                $_SESSION['user_id']
+            ]);
+            $poId = intval($pdo->lastInsertId());
+
+            $itemInsert = $pdo->prepare("
+                INSERT INTO procurement_po_items (po_id, product_id, item_name, quantity, quantity_remaining, unit_cost, total_cost)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            ");
+            foreach ($items as $item) {
+                $itemInsert->execute([
+                    $poId, $item['product_id'], $item['item_name'], $item['quantity'], $item['quantity'],
+                    $item['estimated_unit_price'], $item['line_total']
+                ]);
+            }
+
+            $pdo->prepare("
+                INSERT INTO procurement_approval_logs (request_id, action, previous_status, new_status, actor_id, actor_role, comments)
+                VALUES (?, 'po_created', 'approved', 'approved', ?, ?, ?)
+            ")->execute([$requestId, $_SESSION['user_id'], $_SESSION['role'] ?? '', 'Purchase order ' . $poNumber . ' created (draft).']);
+
+            $pdo->commit();
+            logActivity('po_created', "PO $poNumber created from {$request['request_number']}");
+            echo json_encode(['success' => true, 'po_id' => $poId, 'po_number' => $poNumber, 'status' => 'draft']);
+        } catch (Exception $e) {
+            if ($pdo->inTransaction()) $pdo->rollBack();
+            echo json_encode(['success' => false, 'message' => $e->getMessage()]);
+        }
+        exit();
+    }
+
+    // ---- ISSUE / MARK PURCHASE ORDER AS ORDERED ----
+    if ($_GET['action'] == 'po_issue') {
+        if (!canAccess('procurement_manage') && !isAdmin()) {
+            echo json_encode(['success' => false, 'message' => 'Unauthorized']);
+            exit();
+        }
+        try {
+            $poId = intval($_POST['po_id'] ?? 0);
+            if ($poId <= 0) {
+                throw new Exception('Purchase order not found.');
+            }
+            $pdo->beginTransaction();
+            $poStmt = $pdo->prepare("SELECT * FROM procurement_purchase_orders WHERE id = ? FOR UPDATE");
+            $poStmt->execute([$poId]);
+            $po = $poStmt->fetch();
+            if (!$po) {
+                throw new Exception('Purchase order not found.');
+            }
+            if ($po['status'] !== 'draft') {
+                throw new Exception('Only a draft purchase order can be issued. Current status: ' . ucfirst(str_replace('_', ' ', $po['status'])) . '.');
+            }
+            $stmt = $pdo->prepare("
+                UPDATE procurement_purchase_orders
+                SET status = 'ordered', ordered_at = NOW(), issued_by = ?
+                WHERE id = ? AND status = 'draft'
+            ");
+            $stmt->execute([$_SESSION['user_id'], $poId]);
+            if ($stmt->rowCount() === 0) {
+                throw new Exception('This purchase order was just updated by another user.');
+            }
+            if (!empty($po['purchase_request_id'])) {
+                $pdo->prepare("
+                    INSERT INTO procurement_approval_logs (request_id, action, previous_status, new_status, actor_id, actor_role, comments)
+                    VALUES (?, 'po_ordered', 'approved', 'approved', ?, ?, ?)
+                ")->execute([$po['purchase_request_id'], $_SESSION['user_id'], $_SESSION['role'] ?? '', 'Purchase order ' . $po['po_number'] . ' issued (Ordered).']);
+            }
+            $pdo->commit();
+            logActivity('po_issued', "PO {$po['po_number']} marked Ordered");
+            echo json_encode(['success' => true, 'po_id' => $poId, 'status' => 'ordered']);
+        } catch (Exception $e) {
+            if ($pdo->inTransaction()) $pdo->rollBack();
+            echo json_encode(['success' => false, 'message' => $e->getMessage()]);
+        }
+        exit();
+    }
+
+    // ---- RECEIVE DELIVERY (goods receipt + stock update in one transaction) ----
+    if ($_GET['action'] == 'receipt_save') {
+        if (!canAccess('procurement_manage') && !isAdmin()) {
+            echo json_encode(['success' => false, 'message' => 'Unauthorized']);
+            exit();
+        }
+        try {
+            $poId = intval($_POST['po_id'] ?? 0);
+            if ($poId <= 0) {
+                throw new Exception('Purchase order not found.');
+            }
+            $receivedDate = $_POST['received_date'] ?? date('Y-m-d');
+            $dateCheck = DateTime::createFromFormat('Y-m-d', $receivedDate);
+            if (!$dateCheck || $dateCheck->format('Y-m-d') !== $receivedDate) {
+                throw new Exception('Enter a valid delivery date (YYYY-MM-DD).');
+            }
+            $deliveryReference = trim($_POST['delivery_reference'] ?? '');
+            $invoiceReference = trim($_POST['invoice_reference'] ?? '');
+            $remarks = trim($_POST['remarks'] ?? '');
+            $clientToken = trim($_POST['client_token'] ?? '');
+
+            $receivedItems = json_decode($_POST['received_items'] ?? '[]', true);
+            if (!is_array($receivedItems) || count($receivedItems) === 0) {
+                throw new Exception('Enter the delivered quantities for at least one item.');
+            }
+
+            $pdo->beginTransaction();
+            $poStmt = $pdo->prepare("SELECT * FROM procurement_purchase_orders WHERE id = ? FOR UPDATE");
+            $poStmt->execute([$poId]);
+            $po = $poStmt->fetch();
+            if (!$po) {
+                throw new Exception('Purchase order not found.');
+            }
+            if (!in_array($po['status'], ['ordered', 'sent', 'acknowledged', 'partially_received'], true)) {
+                throw new Exception('Only an issued (Ordered) purchase order can receive goods. Current status: ' . ucfirst(str_replace('_', ' ', $po['status'])) . '.');
+            }
+
+            // Idempotency guard: the same submission token can only ever post once
+            if ($clientToken !== '') {
+                $tokenStmt = $pdo->prepare("SELECT id, grn_number FROM procurement_grns WHERE client_token = ?");
+                $tokenStmt->execute([$clientToken]);
+                $existingGrn = $tokenStmt->fetch();
+                if ($existingGrn) {
+                    throw new Exception('This delivery was already recorded as receipt ' . $existingGrn['grn_number'] . '.');
+                }
+            }
+
+            $grnNumber = generateGoodsReceiptNumber();
+            $totalAccepted = 0;
+            $grnItemRows = [];
+            $grnItemStmt = $pdo->prepare("
+                INSERT INTO procurement_grn_items
+                (grn_id, po_item_id, product_id, item_name, ordered_qty, previously_received,
+                 delivered_qty, accepted_qty, damaged_qty, missing_qty, batch_number, expiry_date, remarks)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ");
+
+            foreach ($receivedItems as $entry) {
+                $poItemId = intval($entry['po_item_id'] ?? 0);
+                $delivered = filter_var($entry['delivered'] ?? null, FILTER_VALIDATE_INT);
+                $accepted = filter_var($entry['accepted'] ?? null, FILTER_VALIDATE_INT);
+                $damaged = filter_var($entry['damaged'] ?? null, FILTER_VALIDATE_INT);
+                if ($poItemId <= 0) {
+                    throw new Exception('Invalid purchase order item.');
+                }
+                if ($delivered === false || $delivered === null || $delivered < 0 ||
+                    $accepted === false || $accepted === null || $accepted < 0 ||
+                    $damaged === false || $damaged === null || $damaged < 0) {
+                    throw new Exception('Delivered, accepted, and damaged quantities must be zero or positive numbers.');
+                }
+                if ($delivered === 0 && $accepted === 0 && $damaged === 0) {
+                    continue;
+                }
+                if ($accepted + $damaged > $delivered) {
+                    throw new Exception('Accepted plus damaged quantity cannot exceed the delivered quantity.');
+                }
+
+                $itemStmt = $pdo->prepare("SELECT * FROM procurement_po_items WHERE id = ? AND po_id = ? FOR UPDATE");
+                $itemStmt->execute([$poItemId, $poId]);
+                $item = $itemStmt->fetch();
+                if (!$item) {
+                    throw new Exception('A received item does not belong to this purchase order.');
+                }
+                $remaining = max(0, intval($item['quantity']) - intval($item['quantity_received']));
+                if ($delivered > $remaining) {
+                    throw new Exception('Delivered quantity for ' . $item['item_name'] . ' (' . $delivered . ') exceeds its remaining order quantity of ' . $remaining . '.');
+                }
+
+                $productId = !empty($item['product_id']) ? intval($item['product_id']) : null;
+                $missing = $delivered - $accepted - $damaged;
+
+                // Stock increases only for accepted quantities, using the existing stock movement mechanism
+                if ($productId && $accepted > 0) {
+                    $stockStmt = $pdo->prepare("SELECT stock_quantity FROM products WHERE id = ? FOR UPDATE");
+                    $stockStmt->execute([$productId]);
+                    $product = $stockStmt->fetch();
+                    if (!$product) {
+                        throw new Exception('Linked product for ' . $item['item_name'] . ' was not found.');
+                    }
+                    $beforeStock = (int) $product['stock_quantity'];
+                    $afterStock = $beforeStock + $accepted;
+                    $pdo->prepare("UPDATE products SET stock_quantity = ? WHERE id = ?")->execute([$afterStock, $productId]);
+                    $pdo->prepare("INSERT INTO stock_movements (product_id, movement_type, quantity, quantity_before, quantity_after, reason, reference_id, reference_type, user_id) VALUES (?, 'purchase', ?, ?, ?, ?, ?, 'purchase_order', ?)")
+                        ->execute([$productId, $accepted, $beforeStock, $afterStock, 'Received via ' . $po['po_number'] . ' (GRN ' . $grnNumber . ')', $poId, $_SESSION['user_id']]);
+                    recordInventoryTransaction($productId, 'PURCHASE', $accepted, $beforeStock, $afterStock, 'purchase_order', $poId, $_SESSION['user_id']);
+                }
+
+                $newReceived = intval($item['quantity_received']) + $accepted;
+                $newRemaining = max(0, intval($item['quantity']) - $newReceived);
+                $pdo->prepare("UPDATE procurement_po_items SET quantity_received = ?, quantity_remaining = ?, received_at = COALESCE(received_at, NOW()), inventory_updated_at = NOW() WHERE id = ?")
+                    ->execute([$newReceived, $newRemaining, $poItemId]);
+
+                $grnItemRows[] = [
+                    'po_item_id' => $poItemId,
+                    'product_id' => $productId,
+                    'item_name' => $item['item_name'],
+                    'ordered' => intval($item['quantity']),
+                    'previous' => intval($item['quantity_received']),
+                    'delivered' => $delivered,
+                    'accepted' => $accepted,
+                    'damaged' => $damaged,
+                    'missing' => $missing,
+                    'batch' => trim((string) ($entry['batch_number'] ?? '')) ?: null,
+                    'expiry' => trim((string) ($entry['expiry_date'] ?? '')) ?: null,
+                    'remarks' => trim((string) ($entry['remarks'] ?? '')) ?: null,
+                ];
+                $totalAccepted += $accepted;
+            }
+
+            if (count($grnItemRows) === 0) {
+                throw new Exception('Enter the delivered quantities for at least one item.');
+            }
+            // Receipt header
+            $grnStmt = $pdo->prepare("
+                INSERT INTO procurement_grns (grn_number, po_id, received_date, received_by, discrepancies, status, delivery_reference, invoice_reference, remarks, client_token)
+                VALUES (?, ?, ?, ?, ?, 'partial', ?, ?, ?, ?)
+            ");
+            $grnStmt->execute([
+                $grnNumber, $poId, $receivedDate, $_SESSION['user_id'], $remarks,
+                $deliveryReference !== '' ? $deliveryReference : null,
+                $invoiceReference !== '' ? $invoiceReference : null,
+                $remarks !== '' ? $remarks : null,
+                $clientToken !== '' ? $clientToken : null
+            ]);
+            $grnId = intval($pdo->lastInsertId());
+
+            foreach ($grnItemRows as $row) {
+                $grnItemStmt->execute([
+                    $grnId, $row['po_item_id'], $row['product_id'], $row['item_name'],
+                    $row['ordered'], $row['previous'], $row['delivered'], $row['accepted'],
+                    $row['damaged'], $row['missing'], $row['batch'], $row['expiry'], $row['remarks']
+                ]);
+            }
+
+            // Update PO status: Partially Received vs Received (accepted quantities only)
+            $outstandingStmt = $pdo->prepare("SELECT COUNT(*) FROM procurement_po_items WHERE po_id = ? AND quantity_received < quantity");
+            $outstandingStmt->execute([$poId]);
+            $fullyReceived = (int) $outstandingStmt->fetchColumn() === 0;
+            $poStatus = $fullyReceived ? 'received' : 'partially_received';
+            $pdo->prepare("UPDATE procurement_purchase_orders SET status = ?, updated_at = NOW() WHERE id = ?")->execute([$poStatus, $poId]);
+
+            if (!empty($po['purchase_request_id'])) {
+                $pdo->prepare("
+                    INSERT INTO procurement_approval_logs (request_id, action, previous_status, new_status, actor_id, actor_role, comments)
+                    VALUES (?, 'goods_received', ?, ?, ?, ?, ?)
+                ")->execute([
+                    $po['purchase_request_id'], $poStatus, $poStatus, $_SESSION['user_id'], $_SESSION['role'] ?? '',
+                    'Receipt ' . $grnNumber . ' recorded for ' . $po['po_number'] . ' (' . $totalAccepted . ' accepted).'
+                ]);
+            }
+
+            $pdo->commit();
+            logActivity('goods_receipt', "GRN $grnNumber for PO {$po['po_number']} ({$totalAccepted} accepted)");
+            echo json_encode([
+                'success' => true,
+                'grn_number' => $grnNumber,
+                'po_status' => $poStatus,
+                'accepted_total' => $totalAccepted
+            ]);
+        } catch (PDOException $e) {
+            if ($pdo->inTransaction()) $pdo->rollBack();
+            error_log('receipt_save failed: ' . $e->getMessage());
+            echo json_encode(['success' => false, 'message' => (int) $e->getCode() === 23000 ? 'This delivery was already submitted. Please refresh the page.' : 'Could not record the delivery.']);
+        } catch (Exception $e) {
+            if ($pdo->inTransaction()) $pdo->rollBack();
+            echo json_encode(['success' => false, 'message' => $e->getMessage()]);
+        }
+        exit();
+    }
+
+    // ---- RECORD SUPPLIER PAYMENT (supports partial payments) ----
+    if ($_GET['action'] == 'record_supplier_payment') {
+        if (!canAccess('finance') && !hasRole('finance') && !isAdmin()) {
+            echo json_encode(['success' => false, 'message' => 'Unauthorized: Finance role required to record supplier payments.']);
+            exit();
+        }
+        try {
+            $invoiceId = intval($_POST['invoice_id'] ?? 0);
+            $amount = filter_var($_POST['amount'] ?? null, FILTER_VALIDATE_FLOAT);
+            $method = $_POST['method'] ?? 'bank_transfer';
+            $paymentDate = trim($_POST['payment_date'] ?? '');
+            $reference = trim($_POST['reference'] ?? '');
+            if (!in_array($method, ['bank_transfer', 'check', 'cash', 'gcash', 'card'], true)) {
+                $method = 'bank_transfer';
+            }
+            if ($paymentDate === '') {
+                $paymentDate = date('Y-m-d');
+            }
+            $dateCheck = DateTime::createFromFormat('Y-m-d', $paymentDate);
+            if (!$dateCheck || $dateCheck->format('Y-m-d') !== $paymentDate) {
+                throw new Exception('Enter a valid payment date (YYYY-MM-DD).');
+            }
+            if ($invoiceId <= 0) {
+                throw new Exception('Supplier invoice not found.');
+            }
+            if ($amount === false || $amount === null || $amount <= 0) {
+                throw new Exception('Payment amount must be greater than zero.');
+            }
+
+            $pdo->beginTransaction();
+            $invStmt = $pdo->prepare("SELECT * FROM procurement_invoices WHERE id = ? FOR UPDATE");
+            $invStmt->execute([$invoiceId]);
+            $invoice = $invStmt->fetch();
+            if (!$invoice) {
+                throw new Exception('Supplier invoice not found.');
+            }
+            if ($invoice['payment_status'] === 'void') {
+                throw new Exception('This invoice has been voided and cannot be paid.');
+            }
+
+            $invoiceAmount = floatval($invoice['amount']);
+            $paidAmount = floatval($invoice['paid_amount']);
+            $outstanding = round($invoiceAmount - $paidAmount, 2);
+            if ($outstanding <= 0) {
+                throw new Exception('This invoice is already fully paid.');
+            }
+            $amount = round($amount, 2);
+            if ($amount > $outstanding + 0.009) {
+                throw new Exception('Payment of ₱' . number_format($amount, 2) . ' exceeds the outstanding balance of ₱' . number_format($outstanding, 2) . '.');
+            }
+
+            // Duplicate payment prevention (same invoice + reference)
+            if ($reference !== '') {
+                $dupe = $pdo->prepare("SELECT id FROM procurement_payments WHERE invoice_id = ? AND reference = ?");
+                $dupe->execute([$invoiceId, $reference]);
+                if ($dupe->fetchColumn()) {
+                    throw new Exception('A payment with this reference has already been recorded for this invoice.');
+                }
+            }
+
+            $payStmt = $pdo->prepare("
+                INSERT INTO procurement_payments (invoice_id, provider, reference, amount, status, payment_date, paid_at, created_by)
+                VALUES (?, ?, ?, ?, 'paid', ?, NOW(), ?)
+            ");
+            $payStmt->execute([
+                $invoiceId, $method, $reference !== '' ? $reference : null, $amount,
+                $paymentDate, $_SESSION['user_id']
+            ]);
+
+            $newPaid = round($paidAmount + $amount, 2);
+            $newStatus = $newPaid >= $invoiceAmount - 0.009 ? 'paid' : 'partial';
+            $updStmt = $pdo->prepare("
+                UPDATE procurement_invoices
+                SET paid_amount = ?, payment_status = ?, paid_at = CASE WHEN ? = 'paid' THEN NOW() ELSE paid_at END
+                WHERE id = ?
+            ");
+            $updStmt->execute([$newPaid, $newStatus, $newStatus, $invoiceId]);
+
+            if ($newStatus === 'paid' && $invoice['po_id']) {
+                $pdo->prepare("UPDATE procurement_purchase_orders SET status = 'closed' WHERE id = ? AND status IN ('delivered','acknowledged')")->execute([$invoice['po_id']]);
+            }
+
+            $pdo->commit();
+            logActivity('supplier_payment_recorded', "Payment of ₱" . number_format($amount, 2) . " recorded for invoice {$invoice['invoice_number']}");
+            echo json_encode([
+                'success' => true,
+                'payment_status' => $newStatus,
+                'paid_amount' => $newPaid,
+                'outstanding' => round($invoiceAmount - $newPaid, 2)
+            ]);
+        } catch (PDOException $e) {
+            if ($pdo->inTransaction()) $pdo->rollBack();
+            error_log('record_supplier_payment failed: ' . $e->getMessage());
+            echo json_encode(['success' => false, 'message' => (int) $e->getCode() === 23000 ? 'A payment with this reference already exists for this invoice.' : 'Could not record the payment.']);
+        } catch (Exception $e) {
+            if ($pdo->inTransaction()) $pdo->rollBack();
+            echo json_encode(['success' => false, 'message' => $e->getMessage()]);
+        }
         exit();
     }
 

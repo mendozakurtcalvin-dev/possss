@@ -100,6 +100,7 @@ case 'inventory_reports':
                                 <a href="?page=inventory_reports&type=movement" class="fin-tab <?php echo $report_type == 'movement' ? 'active' : ''; ?>">🔄 Movements</a>
                                 <a href="?page=inventory_reports&type=purchase" class="fin-tab <?php echo $report_type == 'purchase' ? 'active' : ''; ?>">🛒 Purchases</a>
                                 <a href="?page=inventory_reports&type=valuation" class="fin-tab <?php echo $report_type == 'valuation' ? 'active' : ''; ?>">💰 Valuation</a>
+                        <a href="?page=inventory_reports&type=procurement" class="fin-tab <?php echo $report_type == 'procurement' ? 'active' : ''; ?>">📦 Procurement</a>
                             </div>
                             
                             <!-- Summary KPI Cards -->
@@ -460,7 +461,107 @@ case 'inventory_reports':
                                 </div>
                             </div>
                             <?php endif; ?>
-                            
+
+                            <!-- ===== PROCUREMENT REPORT ===== -->
+                            <?php if ($report_type == 'procurement'): ?>
+                            <?php
+                            require_once __DIR__ . '/proc_common.php';
+                            $prStatusCounts = array_fill_keys(['draft', 'pending_approval', 'revision_requested', 'approved', 'rejected', 'cancelled'], 0);
+                            foreach ($pdo->query("SELECT status, COUNT(*) AS c FROM purchase_requests GROUP BY status") as $prow) {
+                                if (isset($prStatusCounts[$prow['status']])) { $prStatusCounts[$prow['status']] = (int) $prow['c']; }
+                            }
+                            $prRecentRows = $pdo->query("
+                                SELECT pr.*, s.name AS supplier_name, u.full_name AS requester_name
+                                FROM purchase_requests pr
+                                LEFT JOIN suppliers s ON pr.supplier_id = s.id
+                                LEFT JOIN users u ON pr.requester_id = u.id
+                                ORDER BY pr.created_at DESC LIMIT 15
+                            ")->fetchAll();
+                            $procPoRows = $pdo->query("
+                                SELECT po.*, s.name AS supplier_name,
+                                       (SELECT COALESCE(SUM(quantity_received), 0) FROM procurement_po_items WHERE po_id = po.id) AS received_qty,
+                                       (SELECT COALESCE(SUM(quantity), 0) FROM procurement_po_items WHERE po_id = po.id) AS ordered_qty
+                                FROM procurement_purchase_orders po
+                                LEFT JOIN suppliers s ON po.supplier_id = s.id
+                                ORDER BY po.created_at DESC LIMIT 15
+                            ")->fetchAll();
+                            ?>
+                            <div class="inv-card" style="margin-bottom:16px;">
+                                <div class="inv-card-header">
+                                    <div class="inv-card-title-wrap">
+                                        <div class="inv-card-title">📦 Procurement Report</div>
+                                        <div class="inv-card-subtitle">Purchase request status summary</div>
+                                    </div>
+                                </div>
+                                <div class="inv-stats-grid">
+                                    <div class="inv-stat-card"><div class="inv-stat-label">Total Requests</div><div class="inv-stat-value primary"><?php echo number_format(array_sum($prStatusCounts)); ?></div></div>
+                                    <div class="inv-stat-card"><div class="inv-stat-label">Pending Approval</div><div class="inv-stat-value warning"><?php echo number_format($prStatusCounts['pending_approval']); ?></div></div>
+                                    <div class="inv-stat-card"><div class="inv-stat-label">Approved</div><div class="inv-stat-value success"><?php echo number_format($prStatusCounts['approved']); ?></div></div>
+                                    <div class="inv-stat-card"><div class="inv-stat-label">Rejected</div><div class="inv-stat-value danger"><?php echo number_format($prStatusCounts['rejected']); ?></div></div>
+                                </div>
+                            </div>
+                            <div class="inv-card" style="margin-bottom:16px;">
+                                <div class="inv-card-header">
+                                    <div class="inv-card-title-wrap">
+                                        <div class="inv-card-title">🛒 Purchase Orders</div>
+                                        <div class="inv-card-subtitle">Latest <?php echo count($procPoRows); ?> purchase order(s)</div>
+                                    </div>
+                                </div>
+                                <?php if (empty($procPoRows)): ?>
+                                <div class="inv-empty-state"><div class="inv-empty-icon">🛒</div><div class="inv-empty-title">No purchase orders yet</div></div>
+                                <?php else: ?>
+                                <div class="inv-table-wrap">
+                                    <table class="inv-table">
+                                        <thead><tr><th>PO Number</th><th>Supplier</th><th>Date</th><th>Received</th><th>Status</th><th style="text-align:right;">Total</th></tr></thead>
+                                        <tbody>
+                                            <?php foreach ($procPoRows as $ppRow): ?>
+                                            <tr>
+                                                <td><strong><?php echo htmlspecialchars($ppRow['po_number']); ?></strong></td>
+                                                <td><?php echo htmlspecialchars($ppRow['supplier_name'] ?? '—'); ?></td>
+                                                <td><?php echo date('M d, Y', strtotime($ppRow['order_date'])); ?></td>
+                                                <td><?php echo (int) $ppRow['received_qty']; ?> / <?php echo (int) $ppRow['ordered_qty']; ?></td>
+                                                <td><?php echo procPoStatusBadge($ppRow['status']); ?></td>
+                                                <td style="text-align:right;"><strong>₱<?php echo number_format($ppRow['total_amount'], 2); ?></strong></td>
+                                            </tr>
+                                            <?php endforeach; ?>
+                                        </tbody>
+                                    </table>
+                                </div>
+                                <?php endif; ?>
+                            </div>
+
+                            <div class="inv-card">
+                                <div class="inv-card-header">
+                                    <div class="inv-card-title-wrap">
+                                        <div class="inv-card-title">📝 Recent Purchase Requests</div>
+                                        <div class="inv-card-subtitle">Latest <?php echo count($prRecentRows); ?> request(s)</div>
+                                    </div>
+                                </div>
+                                <?php if (empty($prRecentRows)): ?>
+                                <div class="inv-empty-state"><div class="inv-empty-icon">📝</div><div class="inv-empty-title">No purchase requests yet</div></div>
+                                <?php else: ?>
+                                <div class="inv-table-wrap">
+                                    <table class="inv-table">
+                                        <thead><tr><th>Request #</th><th>Date</th><th>Requester</th><th>Supplier</th><th>Status</th><th style="text-align:right;">Estimated Total</th></tr></thead>
+                                        <tbody>
+                                            <?php foreach ($prRecentRows as $prr): ?>
+                                            <tr>
+                                                <td><strong><?php echo htmlspecialchars($prr['request_number']); ?></strong></td>
+                                                <td><?php echo date('M d, Y', strtotime($prr['request_date'])); ?></td>
+                                                <td><?php echo htmlspecialchars($prr['requester_name'] ?? '—'); ?></td>
+                                                <td><?php echo htmlspecialchars($prr['supplier_name'] ?? '—'); ?></td>
+                                                <td><?php echo procStatusBadge($prr['status']); ?></td>
+                                                <td style="text-align:right;"><strong>₱<?php echo number_format($prr['grand_total'], 2); ?></strong></td>
+                                            </tr>
+                                            <?php endforeach; ?>
+                                        </tbody>
+                                    </table>
+                                </div>
+                                <?php endif; ?>
+                            </div>
+
+                            <?php endif; ?>
+
                             <script>
                             function exportInventoryReport() {
                                 var type = '<?php echo $report_type; ?>';

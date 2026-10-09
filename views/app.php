@@ -608,17 +608,38 @@
 
     <?php
     $sidebarPage = $_GET['page'] ?? 'dashboard';
-    $sidebarInventoryPages = ['products', 'stock', 'purchases', 'suppliers', 'inventory_reports', 'categories', 'archive'];
+    $sidebarProcPages = ['proc_dashboard', 'purchase_requests', 'purchase_orders', 'receive_deliveries', 'proc_history'];
+    $sidebarInventoryPages = array_merge(['products', 'stock', 'purchases', 'suppliers', 'inventory_reports', 'categories', 'archive'], $sidebarProcPages);
     $sidebarHrPages = ['hr', 'job_postings'];
     if (!isAdmin() && hasRole('hr')) {
         $sidebarHrPages[] = 'users';
     }
     $sidebarFinancePages = ['finance_dashboard', 'finance_reports'];
+    // Pending approval badge for the admin Procurement Approvals menu
+    $procPendingBadge = 0;
+    if (hasPermission('procurement_approve')) {
+        try {
+            $procPendingBadge = (int) $pdo->query("SELECT COUNT(*) FROM purchase_requests WHERE status = 'pending_approval'")->fetchColumn();
+        } catch (Exception $e) { $procPendingBadge = 0; }
+    }
+    // Users who cannot open the Inventory group (e.g. Finance) keep the top-level Procurement menu
+    $sidebarShowProcGroup = canAccess('procurement') && !canAccess('stock');
+    $sidebarProcGroupPages = array_merge(['procurement'], $sidebarProcPages);
     ?>
-    <?php if (canAccess('procurement')): ?>
-    <details class="sidebar-group" <?php echo $sidebarPage === 'procurement' ? 'open' : ''; ?>>
-        <summary class="<?php echo $sidebarPage === 'procurement' ? 'active' : ''; ?>"><svg class="nav-icon"><use href="#nav-purchases"></use></svg><span>Procurement</span><span class="sidebar-chevron"></span></summary>
+    <?php if ($sidebarShowProcGroup): ?>
+    <details class="sidebar-group" <?php echo in_array($sidebarPage, $sidebarProcGroupPages, true) ? 'open' : ''; ?>>
+        <summary class="<?php echo in_array($sidebarPage, $sidebarProcGroupPages, true) ? 'active' : ''; ?>"><svg class="nav-icon"><use href="#nav-purchases"></use></svg><span>Procurement</span><span class="sidebar-chevron"></span></summary>
         <div class="sidebar-submenu">
+            <a href="?page=proc_dashboard" class="<?php echo $sidebarPage === 'proc_dashboard' ? 'active' : ''; ?>">Procurement Dashboard</a>
+            <a href="?page=purchase_requests" class="<?php echo $sidebarPage === 'purchase_requests' && ($_GET['tab'] ?? '') !== 'create' ? 'active' : ''; ?>">Purchase Requests</a>
+            <?php if (canAccess('procurement_manage')): ?>
+            <a href="?page=purchase_requests&amp;tab=create" class="<?php echo $sidebarPage === 'purchase_requests' && ($_GET['tab'] ?? '') === 'create' ? 'active' : ''; ?>">Create Purchase Request</a>
+            <?php endif; ?>
+            <a href="?page=purchase_orders" class="<?php echo $sidebarPage === 'purchase_orders' ? 'active' : ''; ?>">Purchase Orders</a>
+            <?php if (canAccess('procurement_manage')): ?>
+            <a href="?page=receive_deliveries" class="<?php echo $sidebarPage === 'receive_deliveries' ? 'active' : ''; ?>">Receive Deliveries</a>
+            <?php endif; ?>
+            <a href="?page=proc_history" class="<?php echo $sidebarPage === 'proc_history' ? 'active' : ''; ?>">Procurement History</a>
             <a href="?page=procurement&amp;tab=requisitions" class="<?php echo $sidebarPage === 'procurement' && ($_GET['tab'] ?? 'requisitions') === 'requisitions' ? 'active' : ''; ?>">Requisition &amp; Budget</a>
             <a href="?page=procurement&amp;tab=rfqs" class="<?php echo $sidebarPage === 'procurement' && ($_GET['tab'] ?? '') === 'rfqs' ? 'active' : ''; ?>">Sourcing / RFQ</a>
             <a href="?page=procurement&amp;tab=analysis" class="<?php echo $sidebarPage === 'procurement' && ($_GET['tab'] ?? '') === 'analysis' ? 'active' : ''; ?>">Supplier Selection</a>
@@ -635,8 +656,25 @@
     <details class="sidebar-group" <?php echo in_array($sidebarPage, $sidebarInventoryPages, true) ? 'open' : ''; ?>>
         <summary class="<?php echo in_array($sidebarPage, $sidebarInventoryPages, true) ? 'active' : ''; ?>"><svg class="nav-icon"><use href="#nav-stock"></use></svg><span>Inventory</span><span class="sidebar-chevron"></span></summary>
         <div class="sidebar-submenu">
+            <?php if (canAccess('dashboard')): ?><a href="?page=dashboard" class="<?php echo $sidebarPage === 'dashboard' ? 'active' : ''; ?>">Inventory Dashboard</a><?php endif; ?>
             <?php if (canAccess('products')): ?><a href="?page=products" class="<?php echo $sidebarPage === 'products' ? 'active' : ''; ?>">Products</a><?php endif; ?>
-            <?php if (canAccess('stock')): ?><a href="?page=stock" class="<?php echo $sidebarPage === 'stock' ? 'active' : ''; ?>">Stock</a><?php endif; ?>
+            <?php if (canAccess('stock')): ?>
+            <a href="?page=stock" class="<?php echo $sidebarPage === 'stock' && empty($_GET['low']) ? 'active' : ''; ?>">Stock Management</a>
+            <a href="?page=stock&amp;low=1" class="<?php echo $sidebarPage === 'stock' && !empty($_GET['low']) ? 'active' : ''; ?>">Low-Stock Alerts</a>
+            <?php endif; ?>
+            <?php if (canAccess('procurement')): ?>
+            <details class="sidebar-group sidebar-subgroup" <?php echo in_array($sidebarPage, $sidebarProcPages, true) ? 'open' : ''; ?>>
+                <summary class="<?php echo in_array($sidebarPage, $sidebarProcPages, true) ? 'active' : ''; ?>"><span>Procurement</span><span class="sidebar-chevron"></span></summary>
+                <div class="sidebar-submenu">
+                    <a href="?page=proc_dashboard" class="<?php echo $sidebarPage === 'proc_dashboard' ? 'active' : ''; ?>">Procurement Dashboard</a>
+                    <a href="?page=purchase_requests" class="<?php echo $sidebarPage === 'purchase_requests' && ($_GET['tab'] ?? '') !== 'create' ? 'active' : ''; ?>">Purchase Requests</a>
+                    <a href="?page=purchase_requests&amp;tab=create" class="<?php echo $sidebarPage === 'purchase_requests' && ($_GET['tab'] ?? '') === 'create' ? 'active' : ''; ?>">Create Purchase Request</a>
+                    <a href="?page=purchase_orders" class="<?php echo $sidebarPage === 'purchase_orders' ? 'active' : ''; ?>">Purchase Orders</a>
+                    <a href="?page=receive_deliveries" class="<?php echo $sidebarPage === 'receive_deliveries' ? 'active' : ''; ?>">Receive Deliveries</a>
+                    <a href="?page=proc_history" class="<?php echo $sidebarPage === 'proc_history' ? 'active' : ''; ?>">Procurement History</a>
+                </div>
+            </details>
+            <?php endif; ?>
             <?php if (canAccess('purchases')): ?><a href="?page=purchases" class="<?php echo $sidebarPage === 'purchases' ? 'active' : ''; ?>">Purchases</a><?php endif; ?>
             <?php if (canAccess('suppliers')): ?><a href="?page=suppliers" class="<?php echo $sidebarPage === 'suppliers' ? 'active' : ''; ?>">Suppliers</a><?php endif; ?>
             <?php if (canAccess('inventory_reports')): ?><a href="?page=inventory_reports" class="<?php echo $sidebarPage === 'inventory_reports' ? 'active' : ''; ?>">Inventory Reports</a><?php endif; ?>
@@ -644,6 +682,16 @@
             <?php if (canAccess('archive')): ?><a href="?page=archive" class="<?php echo $sidebarPage === 'archive' ? 'active' : ''; ?>">Archive</a><?php endif; ?>
         </div>
     </details>
+    <?php endif; ?>
+
+    <?php if (hasPermission('procurement_approve')): ?>
+    <a href="?page=proc_approvals" class="<?php echo $sidebarPage === 'proc_approvals' ? 'active' : ''; ?>" style="margin-top:.35rem;">
+        <svg class="nav-icon"><use href="#nav-purchases"></use></svg>
+        Procurement Approvals
+        <?php if ($procPendingBadge > 0): ?>
+        <span style="margin-left:auto;background:#EF4444;color:#fff;padding:2px 8px;border-radius:999px;font-size:11px;font-weight:800;"><?php echo $procPendingBadge; ?></span>
+        <?php endif; ?>
+    </a>
     <?php endif; ?>
 
     <?php if (canAccess('hr')): ?>
@@ -716,7 +764,7 @@
         
         <!-- 🔔 Inventory Notifications Link -->
         <?php 
-        if (hasRole('inventory')):
+        if (hasRole('inventory') || isAdmin()):
             $unreadCount = 0;
             try {
                 $stmt = $pdo->prepare("
